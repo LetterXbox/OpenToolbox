@@ -26,5 +26,9 @@ let package = Package(
             name: "OpenToolboxCoreTests",
             dependencies: ["OpenToolboxCore"]
         ),
+        .testTarget(
+            name: "OpenToolboxAppTests",
+            dependencies: ["OpenToolboxApp", "OpenToolboxCore"]
+        ),
     ]
 )

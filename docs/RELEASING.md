@@ -62,7 +62,7 @@ A test build lets people try a release before it ships, through **Settings → U
 
 - Version it `<next version>-<stage>.<n>`, where the stage is `alpha`, `beta` or `rc`, for example `0.4.0-beta.1`. `scripts/package-app.sh` refuses any other form. Numbers count up within a stage, and `0.4.0-rc.1` comes after every `0.4.0-beta.<n>` and before `0.4.0`.
 - Package it with that version, so the tag, the app's version and the asset name all carry the suffix: tag `v0.4.0-beta.1`, asset `OpenToolbox-0.4.0-beta.1-macOS-universal.dmg`.
-- Publish it with `gh release create <tag> --prerelease --latest=false` on a commit of the release branch. Mark a release as a pre-release exactly when its tag has a suffix; the updater skips any release where the two disagree.
+- Publish it with `gh release create <tag> --target <commit> --prerelease --latest=false`, where `<commit>` is the full SHA of the reviewed release-branch commit the disk image was built from. Without `--target`, a new tag is made from the default branch. Mark a release as a pre-release exactly when its tag has a suffix; the updater skips any release where the two disagree.
 - Don't merge a test build into `main`. Afterwards, check that `https://api.github.com/repos/LetterXbox/OpenToolbox/releases/latest` still names the last full release.
 - The full release is packaged separately with the plain version, because the version inside the app must match the tag exactly.
 - Test builds get release notes in the same format as full releases.

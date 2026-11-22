@@ -41,7 +41,7 @@ struct SoftwareUpdateView: View {
         case .upToDate(let latest):
             Text(L("OpenToolbox is up to date.")).font(.headline)
             Text(latest.isPrerelease
-                ? L("Version \(latest.description) is the latest test build.")
+                ? L("You have version \(latest.description). No newer version is available.")
                 : L("Version \(latest.description) is the latest release."))
                 .foregroundStyle(.secondary)
             buttons { Button(L("OK")) { dismissWindow(id: SoftwareUpdateWindow.id) }.keyboardShortcut(.defaultAction) }

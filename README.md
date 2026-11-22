@@ -146,6 +146,7 @@ Choose **OpenToolbox → Check for Updates…** to check GitHub Releases manuall
 - **Installing:** Updates replace the app when you restart or quit. While OpenToolbox is running in the menu bar, a ready update also appears as **Restart to Update**. If an install fails on quit, OpenToolbox reports why on the next launch.
 - **Read-only / translocated locations:** If OpenToolbox cannot write to its own folder or is running from a temporary location, the update window links to the GitHub release page instead.
 - **Immediate settings effect:** Turning on automatic checks triggers a check right away; turning off automatic download and install cancels any in-progress automatic download and discards an uninstalled automatic update.
+- **Test builds:** Turn on **Include test builds** in **Settings → Updates** to try GitHub pre-releases (such as `0.4.0-beta.1` or `0.3.0-rc.1`) early. It is off by default on full releases, and starts on in a test build until you change it. Test builds may have more bugs, and go through the same SHA-256, bundle-identifier, version, and code-signature checks as full releases. When it is on, update checks read GitHub's list of recent releases and offer the newest test build or full release, updating to the full release once it ships. Turning it off cancels any in-progress test-build download and discards an uninstalled test build, without returning you to an older full release—you stay on the test build until a newer full release comes out.
 
 ## Known Limitations
 

@@ -133,14 +133,15 @@ struct OutputDirectoryTests {
 
     @Test func failedWriteLeavesNothingBehind() async throws {
         struct Failure: Error {}
-        try await withTemporaryDirectory { directory in
+        try await withTemporaryDirectory { (directory: URL) async throws -> Void in
             #expect(throws: Failure.self) {
                 try OutputDirectory.writeNewFile(in: directory, preferredName: "photo.png") { temporary in
                     try Data("partial".utf8).write(to: temporary)
                     throw Failure()
                 }
             }
-            #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+            let leftovers = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            #expect(leftovers.isEmpty)
         }
     }
 

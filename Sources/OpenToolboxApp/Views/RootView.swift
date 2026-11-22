@@ -154,6 +154,8 @@ enum ToolViewRegistry {
         case "image.ocr": OCRView(tool: tool)
         case "pdf.organize": PDFOrganizeView(tool: tool)
         case "pdf.images": ImagesPDFView(tool: tool)
+        case "files.batch-rename": BatchRenameView(tool: tool)
+        case "files.duplicates": FindDuplicatesView(tool: tool)
         default:
             ContentUnavailableView(
                 tool.localizedTitle,

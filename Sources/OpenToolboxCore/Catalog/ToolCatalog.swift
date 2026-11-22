@@ -103,11 +103,11 @@ public enum ToolCatalog {
         ToolDescriptor(
             id: "files.batch-rename", category: .textAndFiles,
             title: "Batch Rename", summary: "Rename many files with patterns and previews.",
-            symbolName: "pencil.line", keywords: ["rename", "files", "batch"], availability: .planned),
+            symbolName: "pencil.line", keywords: ["rename", "files", "batch"]),
         ToolDescriptor(
             id: "files.duplicates", category: .textAndFiles,
             title: "Find Duplicates", summary: "Find duplicate files by content.",
-            symbolName: "doc.on.doc", keywords: ["duplicate", "dedupe", "files"], availability: .planned),
+            symbolName: "doc.on.doc", keywords: ["duplicate", "dedupe", "files"]),
     ]
 
     // MARK: - Images & PDF

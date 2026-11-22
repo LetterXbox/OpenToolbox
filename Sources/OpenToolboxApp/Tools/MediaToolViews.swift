@@ -478,6 +478,7 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
     @ObservationIgnored private var audioOutput: AVCaptureAudioFileOutput?
     @ObservationIgnored private var temporary: URL?
     @ObservationIgnored private var meterTask: Task<Void, Never>?
+    @ObservationIgnored var fileSize: (URL) throws -> Int? = { try $0.resourceValues(forKeys: [.fileSizeKey]).fileSize }
 
     init(defaults: UserDefaults = .standard, store: RecordingStore = .standard()) {
         self.defaults = defaults
@@ -630,10 +631,15 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
     private func finish(problem: String?) {
         defer { reset() }
         guard let temporary, let destination else { return }
-        let exists = FileManager.default.fileExists(atPath: temporary.path)
-        let size = try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize
-        guard exists, size != 0 else {
-            try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent())
+        let isEmpty: Bool
+        do {
+            isEmpty = try fileSize(temporary) == 0
+            if isEmpty { try? FileManager.default.removeItem(at: temporary) }
+        } catch {
+            isEmpty = Self.isMissing(error)
+        }
+        guard !isEmpty else {
+            rmdir(temporary.deletingLastPathComponent().path)
             failure = problem.map { L("Recording failed: \($0)") } ?? L("Nothing was recorded.")
             return
         }
@@ -645,6 +651,18 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
             failure = [problem, message].compactMap { $0 }.joined(separator: " ")
         } else if let problem {
             failure = L("Recording stopped early: \(problem) What was recorded was saved.")
+        }
+    }
+
+    private static func isMissing(_ error: Error) -> Bool {
+        let error = error as NSError
+        switch error.domain {
+        case NSCocoaErrorDomain:
+            return error.code == CocoaError.fileReadNoSuchFile.rawValue || error.code == CocoaError.fileNoSuchFile.rawValue
+        case NSPOSIXErrorDomain:
+            return error.code == Int(ENOENT)
+        default:
+            return false
         }
     }
 
@@ -681,10 +699,12 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
     ) {
         let source = ObjectIdentifier(output)
         let problem = error?.localizedDescription
-        Task { @MainActor in
-            guard let current = self.audioOutput, ObjectIdentifier(current) == source else { return }
-            self.finish(problem: problem)
-        }
+        Task { @MainActor in self.finished(source, problem: problem) }
+    }
+
+    func finished(_ source: ObjectIdentifier, problem: String?) {
+        guard let audioOutput, ObjectIdentifier(audioOutput) == source else { return }
+        finish(problem: problem)
     }
 }
 
@@ -720,7 +740,10 @@ struct RecordAudioView: View {
                 .fixedSize()
                 .disabled(recorder.isBusy)
                 if recorder.isChosenMicrophoneMissing {
-                    Text(L("The microphone you chose isn't connected, so the system default is used."))
+                    Text(
+                        recorder.defaultMicrophone == nil
+                            ? L("The microphone you chose isn't connected. Choose another one.")
+                            : L("The microphone you chose isn't connected, so the system default is used."))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

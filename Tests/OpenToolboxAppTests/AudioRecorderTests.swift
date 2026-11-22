@@ -32,8 +32,7 @@ struct AudioRecorderTests {
             let temporary = try fixture.recording(Data("audio".utf8))
             fixture.recorder.adopt(output, session: nil, temporary: temporary, destination: fixture.destination)
 
-            deliverFinish(to: fixture.recorder, from: AVCaptureAudioFileOutput(), error: nil)
-            try await Task.sleep(for: .milliseconds(100))
+            fixture.recorder.finished(ObjectIdentifier(AVCaptureAudioFileOutput()), problem: nil)
             guard case .recording = fixture.recorder.phase else {
                 Issue.record("a stale finish ended the recording")
                 return
@@ -57,6 +56,37 @@ struct AudioRecorderTests {
             #expect(fixture.recorder.saved == nil)
             #expect(fixture.recorder.failure?.hasPrefix("Recording failed:") == true)
             #expect(!FileManager.default.fileExists(atPath: temporary.deletingLastPathComponent().path))
+        }
+    }
+
+    @Test func aRecordingWhoseSizeCantBeReadIsSaved() async throws {
+        try await withRecorder { fixture in
+            fixture.recorder.fileSize = { _ in throw CocoaError(.fileReadNoPermission) }
+            let output = AVCaptureAudioFileOutput()
+            let temporary = try fixture.recording(Data("audio".utf8))
+            fixture.recorder.adopt(output, session: nil, temporary: temporary, destination: fixture.destination)
+
+            fixture.recorder.finished(ObjectIdentifier(output), problem: nil)
+            #expect(fixture.recorder.phase == .idle)
+            let saved = try #require(fixture.recorder.saved)
+            #expect(try Data(contentsOf: saved) == Data("audio".utf8))
+        }
+    }
+
+    @Test func aMissingRecordingLeavesOtherFilesAlone() async throws {
+        try await withRecorder { fixture in
+            let output = AVCaptureAudioFileOutput()
+            let temporary = try fixture.recording(Data("audio".utf8))
+            let folder = temporary.deletingLastPathComponent()
+            let other = folder.appending(path: "other.m4a")
+            try FileManager.default.moveItem(at: temporary, to: other)
+            fixture.recorder.adopt(output, session: nil, temporary: temporary, destination: fixture.destination)
+
+            fixture.recorder.finished(ObjectIdentifier(output), problem: nil)
+            #expect(fixture.recorder.phase == .idle)
+            #expect(fixture.recorder.saved == nil)
+            #expect(fixture.recorder.failure == "Nothing was recorded.")
+            #expect(FileManager.default.fileExists(atPath: other.path))
         }
     }
 

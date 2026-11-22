@@ -88,9 +88,9 @@ struct PasswordGeneratorTests {
         for _ in 0..<50 {
             let password = PasswordGenerator.generate(PasswordGenerator.Options(length: 8), using: &generator)
             #expect(password.count == 8)
-            #expect(password.contains(where: \.isLowercase))
-            #expect(password.contains(where: \.isUppercase))
-            #expect(password.contains(where: \.isNumber))
+            #expect(password.contains(where: { $0.isLowercase }))
+            #expect(password.contains(where: { $0.isUppercase }))
+            #expect(password.contains(where: { $0.isNumber }))
             #expect(password.contains(where: { PasswordGenerator.symbolSet.contains($0) }))
         }
     }

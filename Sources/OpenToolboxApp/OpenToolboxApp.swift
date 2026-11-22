@@ -19,6 +19,7 @@ struct OpenToolboxApp: App {
                 CheckForUpdatesButton(updates: appDelegate.updates)
             }
             SidebarCommands()
+            ImportFromDevicesCommands()
             ToolsCommands(model: model)
         }
 

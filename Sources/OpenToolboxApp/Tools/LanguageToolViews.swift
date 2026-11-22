@@ -119,31 +119,34 @@ struct TranslateView: View {
     }
 
     private func run(_ session: TranslationSession) async {
+        do {
+            let (text, detected) = try await Self.translate(input, with: session)
+            output = text
+            if source == nil, let detected { note = L("Detected \(languageName(detected)).") }
+        } catch {
+            failure = L("The text couldn't be translated: \(error.localizedDescription)")
+        }
+        isTranslating = false
+    }
+
+    /// Translates paragraph by paragraph so blank lines between them are kept.
+    @concurrent
+    nonisolated private static func translate(_ input: String, with session: TranslationSession) async throws
+        -> (String, Locale.Language?)
+    {
         let paragraphs = input.components(separatedBy: "\n\n")
         let requests = paragraphs.enumerated().compactMap { index, paragraph in
             paragraph.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? nil : TranslationSession.Request(sourceText: paragraph, clientIdentifier: String(index))
         }
-        do {
-            let responses = try await session.translations(from: requests)
-            var translated = paragraphs.map { _ in "" }
-            for response in responses {
-                if let id = response.clientIdentifier, let index = Int(id), translated.indices.contains(index) {
-                    translated[index] = response.targetText
-                }
-            }
-            let detected = responses.first.map(\.sourceLanguage)
-            await MainActor.run {
-                output = translated.joined(separator: "\n\n")
-                if source == nil, let detected { note = L("Detected \(languageName(detected)).") }
-                isTranslating = false
-            }
-        } catch {
-            await MainActor.run {
-                failure = L("The text couldn't be translated: \(error.localizedDescription)")
-                isTranslating = false
+        let responses = try await session.translations(from: requests)
+        var translated = paragraphs.map { _ in "" }
+        for response in responses {
+            if let id = response.clientIdentifier, let index = Int(id), translated.indices.contains(index) {
+                translated[index] = response.targetText
             }
         }
+        return (translated.joined(separator: "\n\n"), responses.first?.sourceLanguage)
     }
 }
 

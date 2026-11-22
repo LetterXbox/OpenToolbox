@@ -184,18 +184,15 @@ public enum ToolCatalog {
         ToolDescriptor(
             id: "pdf.forms", category: .imagesAndPDF,
             title: "Fill & Flatten Forms", summary: "Fill in PDF forms and flatten them into the page.",
-            symbolName: "rectangle.and.pencil.and.ellipsis", keywords: ["pdf", "form", "fill", "flatten", "fields"],
-            availability: .planned),
+            symbolName: "rectangle.and.pencil.and.ellipsis", keywords: ["pdf", "form", "fill", "flatten", "fields"]),
         ToolDescriptor(
             id: "pdf.scan", category: .imagesAndPDF,
             title: "Scan Document", summary: "Scan pages from a scanner or an iPhone into a PDF.",
-            symbolName: "doc.viewfinder", keywords: ["scan", "scanner", "document", "iphone", "continuity camera", "pdf"],
-            availability: .planned),
+            symbolName: "doc.viewfinder", keywords: ["scan", "scanner", "document", "iphone", "continuity camera", "pdf"]),
         ToolDescriptor(
             id: "pdf.web", category: .imagesAndPDF,
             title: "Web Page to PDF", summary: "Save a web page as a PDF.",
-            symbolName: "globe", keywords: ["web", "webpage", "url", "html", "pdf", "save"],
-            availability: .planned),
+            symbolName: "globe", keywords: ["web", "webpage", "url", "html", "pdf", "save"]),
     ]
 
     // MARK: - Mac Utilities

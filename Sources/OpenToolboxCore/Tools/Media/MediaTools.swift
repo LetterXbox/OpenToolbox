@@ -120,9 +120,9 @@ public enum FrameExtractor {
     }
 }
 
-/// Frame-accurate audio trimming. WAV, AIFF and CAF stay lossless; other formats become AAC.
+/// Frame-accurate audio trimming. WAV, AIFF and CAF keep their own format and encoding; other formats become AAC.
 public enum AudioTrimmer {
-    static let losslessExtensions: Set<String> = ["wav", "wave", "aif", "aiff", "aifc", "caf"]
+    static let formatKeepingExtensions: Set<String> = ["wav", "wave", "aif", "aiff", "aifc", "caf"]
 
     public static func duration(of url: URL) throws -> Double {
         let file = try open(url)
@@ -147,16 +147,16 @@ public enum AudioTrimmer {
         guard last > first else { throw MediaToolError.invalidRange }
 
         let ext = url.pathExtension.lowercased()
-        let lossless = losslessExtensions.contains(ext)
+        let keepsFormat = formatKeepingExtensions.contains(ext)
         let settings: [String: Any] =
-            lossless
+            keepsFormat
             ? input.fileFormat.settings
             : [
                 AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: rate,
                 AVNumberOfChannelsKey: format.channelCount, AVEncoderBitRateKey: 192_000 * Int(min(format.channelCount, 2)) / 2,
             ]
         let base = url.deletingPathExtension().lastPathComponent
-        return try output.writeNewFile(for: tool, preferredName: "\(base) trimmed.\(lossless ? ext : "m4a")") { destination in
+        return try output.writeNewFile(for: tool, preferredName: "\(base) trimmed.\(keepsFormat ? ext : "m4a")") { destination in
             do {
                 let writer = try AVAudioFile(
                     forWriting: destination, settings: settings, commonFormat: format.commonFormat,

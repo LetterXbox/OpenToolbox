@@ -627,7 +627,7 @@ struct TrimAudioView: View {
                     .disabled(pendingRange == nil || isProcessing)
                 if isProcessing { ProgressView().controlSize(.small) }
                 Spacer()
-                Text(L("WAV, AIFF and CAF stay lossless; other formats are saved as AAC"))
+                Text(L("WAV, AIFF and CAF keep their format and encoding; other formats are saved as AAC"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

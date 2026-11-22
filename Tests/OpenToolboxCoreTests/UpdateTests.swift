@@ -352,6 +352,16 @@ struct UpdateTests {
         }
     }
 
+    @Test func pathsResolveTheSameWhetherOrNotTheyExist() throws {
+        try withTemporaryDirectorySync { root in
+            let folder = root.appending(path: "work", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let missing = UpdateInstaller.resolved(folder.appending(path: "missing.dmg").path)
+            #expect(missing == UpdateInstaller.resolved(folder.path) + "/missing.dmg")
+            #expect(UpdateInstaller.resolved(folder.path) == UpdateInstaller.resolved(folder.path + "/"))
+        }
+    }
+
     @Test func staleWorkIsKeptWhenAttachedImagesAreUnknown() async throws {
         try await withTemporaryDirectory { root in
             let work = root.appending(path: "work", directoryHint: .isDirectory)

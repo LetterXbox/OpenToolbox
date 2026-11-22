@@ -386,8 +386,21 @@ public struct UpdateInstaller: Sendable {
         }
     }
 
-    private static func resolved(_ path: String) -> String {
-        URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+    /// The canonical form of `path`: its deepest existing folder through `realpath`, then the rest as given.
+    static func resolved(_ path: String) -> String {
+        var existing = URL(fileURLWithPath: path).standardizedFileURL
+        var rest: [String] = []
+        while existing.path != "/" {
+            if let real = realpath(existing.path, nil) {
+                defer { free(real) }
+                return rest.reversed().reduce(URL(fileURLWithPath: String(cString: real))) {
+                    $0.appending(path: $1)
+                }.path
+            }
+            rest.append(existing.lastPathComponent)
+            existing.deleteLastPathComponent()
+        }
+        return path
     }
 
     private func stage(from mountPoint: URL, version: AppVersion, next installedApp: URL) async throws

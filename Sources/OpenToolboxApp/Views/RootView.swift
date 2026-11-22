@@ -13,6 +13,16 @@ struct RootView: View {
         } detail: {
             DetailView()
         }
+        .toolbar {
+            ToolbarItem {
+                Button {
+                    window.isCommandPaletteVisible = true
+                } label: {
+                    Label(L("Quick Open"), systemImage: "magnifyingglass")
+                }
+                .help(L("Quick Open…"))
+            }
+        }
         .frame(minWidth: 820, minHeight: 520)
         .overlay {
             if window.isCommandPaletteVisible {
@@ -75,40 +85,6 @@ struct SidebarView: View {
             }
         }
         .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 320)
-        .sidebarBottomBar {
-            Button {
-                window.isCommandPaletteVisible = true
-            } label: {
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                    Text(L("Quick Open"))
-                    Spacer()
-                    Text(verbatim: "⌘K").foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
-            }
-            .buttonStyle(.plain)
-            .padding(10)
-        }
-    }
-}
-
-private extension View {
-    @ViewBuilder
-    func sidebarBottomBar<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        // safeAreaBar first ships in the macOS 26 SDK (Swift 6.2); Xcode 16 must still build this file.
-        #if compiler(>=6.2)
-        if #available(macOS 26, *) {
-            scrollEdgeEffectStyle(.hard, for: .bottom)
-                .safeAreaBar(edge: .bottom, content: content)
-        } else {
-            safeAreaInset(edge: .bottom, content: content)
-        }
-        #else
-        safeAreaInset(edge: .bottom, content: content)
-        #endif
     }
 }
 
@@ -139,8 +115,15 @@ struct SidebarToolRow: View {
 struct DetailView: View {
     @Environment(WindowModel.self) private var window
 
+    private var hasActiveTool: Bool {
+        if case .tool(let id) = window.selection {
+            return ToolCatalog.tool(id) != nil && window.openedTools.contains(id)
+        }
+        return false
+    }
+
     var body: some View {
-        ZStack {
+        DetailDeckLayout {
             ForEach(window.openedTools, id: \.self) { id in
                 if let tool = ToolCatalog.tool(id) {
                     let isShown = window.selection == .tool(id)
@@ -151,10 +134,18 @@ struct DetailView: View {
                         .disabled(!isShown)
                         .accessibilityHidden(!isShown)
                         .zIndex(isShown ? 1 : 0)
+                        .layoutValue(key: DetailPageActiveKey.self, value: isShown)
+                        .layoutValue(key: DetailPageIDKey.self, value: .tool(id))
                 }
             }
-            page
+            if !hasActiveTool {
+                page
+                    .zIndex(1)
+                    .layoutValue(key: DetailPageActiveKey.self, value: true)
+                    .layoutValue(key: DetailPageIDKey.self, value: window.selection)
+            }
         }
+        .clipped()
         .navigationTitle(title)
     }
 
@@ -183,6 +174,59 @@ struct DetailView: View {
         case .engines: L("Engines")
         case .tool(let id): ToolCatalog.tool(id)?.localizedTitle ?? L("OpenToolbox")
         case nil: L("OpenToolbox")
+        }
+    }
+}
+
+private struct DetailPageActiveKey: LayoutValueKey {
+    static let defaultValue = false
+}
+
+private struct DetailPageIDKey: LayoutValueKey {
+    static let defaultValue: SidebarItem? = nil
+}
+
+private struct DetailDeckLayout: Layout {
+    struct Cache {
+        var frozenSizes: [SidebarItem: CGSize] = [:]
+    }
+
+    func makeCache(subviews: Subviews) -> Cache {
+        Cache()
+    }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        let liveIDs = Set(subviews.compactMap { $0[DetailPageIDKey.self] })
+        cache.frozenSizes = cache.frozenSizes.filter { liveIDs.contains($0.key) }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        if let width = proposal.width, let height = proposal.height,
+            width > 0, height > 0, width.isFinite, height.isFinite
+        {
+            return CGSize(width: width, height: height)
+        }
+        if let active = subviews.first(where: { $0[DetailPageActiveKey.self] }) {
+            return active.sizeThatFits(proposal)
+        }
+        return proposal.replacingUnspecifiedDimensions()
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        let activeSize = bounds.size
+        let hasValidSize = activeSize.width > 0 && activeSize.height > 0
+        for subview in subviews {
+            let id = subview[DetailPageIDKey.self]
+            if subview[DetailPageActiveKey.self] {
+                if let id, hasValidSize { cache.frozenSizes[id] = activeSize }
+                subview.place(at: bounds.origin, proposal: ProposedViewSize(activeSize))
+            } else {
+                let frozen = id.flatMap { cache.frozenSizes[$0] } ?? activeSize
+                if let id, cache.frozenSizes[id] == nil, hasValidSize {
+                    cache.frozenSizes[id] = frozen
+                }
+                subview.place(at: bounds.origin, proposal: ProposedViewSize(frozen))
+            }
         }
     }
 }

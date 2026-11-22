@@ -33,14 +33,19 @@ public struct OutputDirectory: Sendable {
         date: Date = Date(),
         calendar: Calendar = .current
     ) throws -> URL {
+        let directory = directoryURL(for: tool, date: date, calendar: calendar)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    /// The run location without creating it, for file tools that preview the output first.
+    func directoryURL(for tool: ToolID, date: Date, calendar: Calendar) -> URL {
         let components = calendar.dateComponents([.year, .month, .day], from: date)
         let day = String(
             format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
-        let directory = baseDirectory
+        return baseDirectory
             .appending(path: day, directoryHint: .isDirectory)
             .appending(path: Self.folderName(for: tool), directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
     }
 
     /// A file URL in `directory` named `preferredName` that does not exist yet,

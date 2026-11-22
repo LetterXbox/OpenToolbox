@@ -1,3 +1,5 @@
+import Foundation
+
 /// A dotted numeric release version such as `0.1.1`, optionally followed by a pre-release suffix such as
 /// `-beta.2` or `-rc.1`. A leading `v` is accepted. Versions compare by Semantic Versioning precedence, so
 /// `0.3.0-rc.1` < `0.3.0-rc.10` < `0.3.0`.

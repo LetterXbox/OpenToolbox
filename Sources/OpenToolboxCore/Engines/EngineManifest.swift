@@ -128,7 +128,10 @@ public enum EngineCatalog {
     private static let ghostscriptPayload = EnginePayload.pkg(
         payloadPath: "Ghostscript-10.07.1-Start.pkg/Payload",
         executablePath: "usr/local/bin/gs-noX11",
-        includedPrefixes: ["usr/local/bin/gs-noX11"]
+        includedPrefixes: [
+            "usr/local/bin/gs-noX11",
+            "usr/local/share/ghostscript/10.07.1",
+        ]
     )
 
     /// Engines without a pinned build are listed but not installable.

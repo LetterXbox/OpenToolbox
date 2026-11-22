@@ -8,8 +8,6 @@ import Testing
 
 @Suite("v0.4 tools")
 struct V04ToolTests {
-    // MARK: - OutputDirectory.writeNewDirectory
-
     @Test func writeNewDirectoryHandlesCollisionsAndRefusesLinks() async throws {
         try await withTemporaryDirectory { directory in
             let output = OutputDirectory(baseDirectory: directory)
@@ -30,8 +28,6 @@ struct V04ToolTests {
         }
     }
 
-    // MARK: - PDFCompressor
-
     @Test func pdfCompressorArgumentsAndSavingsBehavior() async throws {
         try await withTemporaryDirectory { directory in
             let sample = directory.appending(path: "sample.pdf")
@@ -43,15 +39,28 @@ struct V04ToolTests {
             let originalSize = try sample.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
             #expect(originalSize > 100)
 
-            let args = PDFCompressor.arguments(input: sample, output: directory.appending(path: "out.pdf"), preset: .ebook)
+            let fakeBin = directory.appending(path: "usr/local/bin/gs-noX11")
+            let fakeInit = directory.appending(path: "usr/local/share/ghostscript/10.07.1/Resource/Init")
+            let fakeLib = directory.appending(path: "usr/local/share/ghostscript/10.07.1/lib")
+            try FileManager.default.createDirectory(at: fakeInit, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: fakeLib, withIntermediateDirectories: true)
+            let discovered = PDFCompressor.resourceSearchPaths(for: fakeBin)
+            #expect(discovered == [fakeInit.path, fakeLib.path])
+
+            let args = PDFCompressor.arguments(
+                input: sample,
+                output: directory.appending(path: "out.pdf"),
+                preset: .ebook,
+                resourcePaths: discovered
+            )
             #expect(args.contains("-dSAFER"))
             #expect(args.contains("-dPDFSETTINGS=/ebook"))
+            #expect(args.contains("-I\(fakeInit.path):\(fakeLib.path)"))
             #expect(args.contains("--"))
 
             let output = OutputDirectory(baseDirectory: directory.appending(path: "out"))
             let fakeGS = URL(fileURLWithPath: "/usr/bin/true")
 
-            // Smaller output is saved.
             let smallerResult = try await PDFCompressor.compress(
                 sample, preset: .screen, executable: fakeGS, output: output, tool: "pdf.compress"
             ) { _, passedArgs in
@@ -64,7 +73,6 @@ struct V04ToolTests {
             #expect(smallerResult.compressedBytes == 40)
             #expect(smallerResult.savedFraction > 0)
 
-            // Larger output is not saved.
             let largerResult = try await PDFCompressor.compress(
                 sample, preset: .prepress, executable: fakeGS, output: output, tool: "pdf.compress"
             ) { _, passedArgs in
@@ -76,8 +84,6 @@ struct V04ToolTests {
             #expect(largerResult.output == nil)
         }
     }
-
-    // MARK: - ArchiveTool
 
     @Test func archiveToolArgumentsAndSafetyAudit() async throws {
         try await withTemporaryDirectory { directory in
@@ -107,7 +113,6 @@ struct V04ToolTests {
             #expect(ArchiveTool.archiveStem(for: URL(fileURLWithPath: "/tmp/demo.tar.gz")) == "demo")
             #expect(ArchiveTool.archiveStem(for: URL(fileURLWithPath: "/tmp/demo.7z")) == "demo")
 
-            // Audit rejects symlinks.
             let extractDir = directory.appending(path: "extract")
             try FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
             try FileManager.default.createSymbolicLink(
@@ -118,7 +123,6 @@ struct V04ToolTests {
                 try ArchiveTool.auditExtractedTree(at: extractDir)
             }
 
-            // Extract publishes folder safely and detects wrong password.
             let output = OutputDirectory(baseDirectory: directory.appending(path: "out"))
             let archive = directory.appending(path: "sample.zip")
             try Data("fake".utf8).write(to: archive)
@@ -144,8 +148,6 @@ struct V04ToolTests {
             }
         }
     }
-
-    // MARK: - MarkdownHTML
 
     @Test func markdownHTMLRendersGFMAndSanitizesUnsafeMarkup() {
         let md = """
@@ -176,8 +178,6 @@ struct V04ToolTests {
         #expect(html.contains("Content-Security-Policy"))
     }
 
-    // MARK: - OfficeDocumentConverter
-
     @Test func officeConverterStagesQuickLookAndFallsBackToTextutil() async throws {
         try await withTemporaryDirectory { directory in
             let docx = directory.appending(path: "memo.docx")
@@ -195,7 +195,6 @@ struct V04ToolTests {
             defer { preview.cleanup() }
             #expect(preview.htmlURL.lastPathComponent == "Preview.html")
 
-            // If qlmanage emits nothing for .docx, fallback to textutil.
             let fallback = try await OfficeDocumentConverter.stageHTMLPreview(for: docx) { exe, args in
                 if exe.lastPathComponent == "qlmanage" {
                     return EngineProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
@@ -208,7 +207,6 @@ struct V04ToolTests {
             defer { fallback.cleanup() }
             #expect(FileManager.default.fileExists(atPath: fallback.htmlURL.path))
 
-            // For .pptx with no qlmanage preview, fail cleanly.
             let pptx = directory.appending(path: "slides.pptx")
             try Data("fake".utf8).write(to: pptx)
             await #expect(throws: OfficeDocumentError.previewUnavailable("slides.pptx")) {
@@ -217,7 +215,6 @@ struct V04ToolTests {
                 }
             }
 
-            // Markdown to HTML conversion requires no external subprocess.
             let mdFile = directory.appending(path: "notes.md")
             try Data("# Hi\n".utf8).write(to: mdFile)
             let output = OutputDirectory(baseDirectory: directory.appending(path: "out"))
@@ -228,8 +225,6 @@ struct V04ToolTests {
             #expect(rendered.contains("<h1>Hi</h1>"))
         }
     }
-
-    // MARK: - FFmpegTools
 
     @Test func ffmpegHelpersAndProbeParsing() throws {
         let json = """
@@ -331,12 +326,11 @@ struct V04ToolTests {
         }
     }
 
-    // MARK: - VideoDownloader
-
     @Test func videoDownloaderValidatesURLParsesProgressAndSkipsSymlinks() async throws {
         #expect(try VideoDownloader.validateURL("example.com/watch").absoluteString == "https://example.com/watch")
         #expect(throws: VideoDownloadError.invalidURL) { try VideoDownloader.validateURL("file:///etc/passwd") }
         #expect(throws: VideoDownloadError.invalidURL) { try VideoDownloader.validateURL("javascript:alert(1)") }
+        #expect(throws: VideoDownloadError.invalidURL) { try VideoDownloader.validateURL("--exec=evil") }
         #expect(throws: VideoDownloadError.invalidURL) { try VideoDownloader.validateURL("") }
 
         #expect(VideoDownloader.parseProgressLine("PROGRESS  42.5%") == 0.425)

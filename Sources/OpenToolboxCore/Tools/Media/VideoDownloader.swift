@@ -39,7 +39,7 @@ public enum VideoDownloader {
         guard let url = URL(string: text),
               let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
-              let host = url.host(), !host.isEmpty else {
+              let host = url.host(), !host.isEmpty, !host.hasPrefix("-") else {
             throw VideoDownloadError.invalidURL
         }
         return url

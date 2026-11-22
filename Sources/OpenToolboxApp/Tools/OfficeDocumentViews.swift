@@ -25,6 +25,15 @@ final class OfflineHTMLPDFRenderer: NSObject, WKNavigationDelegate {
         }
     }
 
+    private static let blockNetworkRulesJSON = """
+    [
+      {
+        "trigger": { "url-filter": "^(https?|wss?|ftp)://.*" },
+        "action": { "type": "block" }
+      }
+    ]
+    """
+
     private func render(
         width: CGFloat,
         allowedRoot: String?,
@@ -32,6 +41,13 @@ final class OfflineHTMLPDFRenderer: NSObject, WKNavigationDelegate {
     ) async throws -> Data {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        if let ruleList = try await WKContentRuleListStore.default().compileContentRuleList(
+            forIdentifier: "OpenToolboxOfflineBlock",
+            encodedContentRuleList: Self.blockNetworkRulesJSON
+        ) {
+            configuration.userContentController.add(ruleList)
+        }
         let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: width, height: 1122), configuration: configuration)
         webView.navigationDelegate = self
         self.webView = webView

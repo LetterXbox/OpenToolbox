@@ -182,8 +182,6 @@ public enum FFmpegTools {
         try await EngineProcess.run(exe, arguments: args, onStdoutLine: onStdoutLine)
     }
 
-    // MARK: - FFprobe
-
     public static func probeArguments(input: URL) -> [String] {
         [
             "-v", "error",
@@ -265,8 +263,6 @@ public enum FFmpegTools {
         return raw
     }
 
-    // MARK: - Progress parsing
-
     /// Parses `out_time_us=<microseconds>` or `progress=end` from `ffmpeg -progress pipe:1`.
     public static func parseProgressLine(_ line: String, durationSeconds: Double?) -> Double? {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -280,8 +276,6 @@ public enum FFmpegTools {
         }
         return nil
     }
-
-    // MARK: - Filter builders
 
     /// Builds chained `atempo` filters because each FFmpeg `atempo` stage supports `0.5...2.0`.
     public static func atempoFilterChain(speed: Double) throws -> String {
@@ -378,8 +372,6 @@ public enum FFmpegTools {
         }
         return args
     }
-
-    // MARK: - Tool runners
 
     public static func compressVideo(
         _ source: URL,
@@ -608,9 +600,11 @@ public enum FFmpegTools {
         var totalDuration = 0.0
         var firstWidth = 1920
         var firstHeight = 1080
+        var clipInfos: [MediaProbeInfo?] = Array(repeating: nil, count: sources.count)
         if let ffprobe {
             for (index, url) in sources.enumerated() {
                 if let info = try? await probe(url, ffprobe: ffprobe, runner: runner) {
+                    clipInfos[index] = info
                     totalDuration += info.durationSeconds ?? 0
                     if index == 0, let video = info.primaryVideo, let w = video.width, let h = video.height {
                         firstWidth = max(2, w / 2 * 2)
@@ -643,6 +637,7 @@ public enum FFmpegTools {
             )
         }
 
+        let includeAudio = clipInfos.contains { $0?.hasAudio ?? true }
         var args: [String] = []
         var filterParts: [String] = []
         var concatInputs = ""
@@ -651,16 +646,38 @@ public enum FFmpegTools {
             filterParts.append(
                 "[\(index):v]scale=\(firstWidth):\(firstHeight):force_original_aspect_ratio=decrease,pad=\(firstWidth):\(firstHeight):(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p[v\(index)]"
             )
-            filterParts.append("[\(index):a]aresample=48000,aformat=channel_layouts=stereo[a\(index)]")
-            concatInputs += "[v\(index)][a\(index)]"
+            if includeAudio {
+                let info = clipInfos[index]
+                if info?.hasAudio ?? true {
+                    filterParts.append("[\(index):a]aresample=48000,aformat=channel_layouts=stereo[a\(index)]")
+                } else {
+                    let clipDuration = max(0.05, info?.durationSeconds ?? 1.0)
+                    filterParts.append(
+                        String(format: "anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration=%.3f[a%d]", clipDuration, index)
+                    )
+                }
+                concatInputs += "[v\(index)][a\(index)]"
+            } else {
+                concatInputs += "[v\(index)]"
+            }
         }
-        filterParts.append("\(concatInputs)concat=n=\(sources.count):v=1:a=1[v][a]")
-        args += [
-            "-filter_complex", filterParts.joined(separator: ";"),
-            "-map", "[v]", "-map", "[a]",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "22", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
-        ]
+        if includeAudio {
+            filterParts.append("\(concatInputs)concat=n=\(sources.count):v=1:a=1[v][a]")
+            args += [
+                "-filter_complex", filterParts.joined(separator: ";"),
+                "-map", "[v]", "-map", "[a]",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "22", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
+            ]
+        } else {
+            filterParts.append("\(concatInputs)concat=n=\(sources.count):v=1:a=0[v]")
+            args += [
+                "-filter_complex", filterParts.joined(separator: ";"),
+                "-map", "[v]",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "22", "-pix_fmt", "yuv420p",
+                "-an", "-movflags", "+faststart",
+            ]
+        }
         return try await runToOutput(
             ffmpeg: ffmpeg,
             arguments: args,
@@ -978,8 +995,6 @@ public enum FFmpegTools {
             runner: runner
         )
     }
-
-    // MARK: - Helpers
 
     private static func probeDuration(_ source: URL, ffprobe: URL?, runner: Runner) async -> Double? {
         guard let ffprobe else { return nil }

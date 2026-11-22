@@ -222,8 +222,6 @@ struct EngineArchiveTests {
         }
     }
 
-    // MARK: - Fixture builders
-
     private final class LineRecorder: @unchecked Sendable {
         private let lock = NSLock()
         private var items: [String] = []

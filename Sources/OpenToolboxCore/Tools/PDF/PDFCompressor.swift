@@ -40,16 +40,47 @@ public struct PDFCompressionResult: Equatable, Sendable {
 public enum PDFCompressor {
     public typealias Runner = @Sendable (URL, [String]) async throws -> EngineProcessResult
 
+    public static func resourceSearchPaths(for executable: URL) -> [String] {
+        let prefix = executable
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let shareRoot = prefix.appending(path: "share/ghostscript", directoryHint: .isDirectory)
+        guard let versions = try? FileManager.default.contentsOfDirectory(
+            at: shareRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+        var paths: [String] = []
+        for versionDir in versions.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            for sub in ["Resource/Init", "lib", "Resource/Font"] {
+                let candidate = versionDir.appending(path: sub, directoryHint: .isDirectory)
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDir), isDir.boolValue {
+                    paths.append(candidate.path)
+                }
+            }
+        }
+        return paths
+    }
+
     public static func arguments(
         input: URL,
         output: URL,
-        preset: PDFCompressionPreset
+        preset: PDFCompressionPreset,
+        resourcePaths: [String] = []
     ) -> [String] {
-        [
+        var args = [
             "-dSAFER",
             "-dBATCH",
             "-dNOPAUSE",
             "-dQUIET",
+        ]
+        if !resourcePaths.isEmpty {
+            args.append("-I\(resourcePaths.joined(separator: ":"))")
+        }
+        args += [
             "-sDEVICE=pdfwrite",
             "-dCompatibilityLevel=1.4",
             "-dPDFSETTINGS=\(preset.ghostscriptSetting)",
@@ -57,6 +88,7 @@ public enum PDFCompressor {
             "--",
             input.path,
         ]
+        return args
     }
 
     public static func compress(
@@ -79,7 +111,8 @@ public enum PDFCompressor {
         defer { try? FileManager.default.removeItem(at: staging) }
 
         let tempOutput = staging.appending(path: "compressed.pdf", directoryHint: .notDirectory)
-        let args = arguments(input: source, output: tempOutput, preset: preset)
+        let resources = resourceSearchPaths(for: executable)
+        let args = arguments(input: source, output: tempOutput, preset: preset, resourcePaths: resources)
         let result = try await runner(executable, args)
         guard result.exitCode == 0 else {
             throw EngineProcessError.failed(

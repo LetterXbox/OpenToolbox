@@ -1,5 +1,7 @@
+import Darwin
 import Foundation
 import Testing
+import os
 
 @testable import OpenToolboxCore
 
@@ -9,7 +11,7 @@ struct EngineStoreTests {
     static let payloadSHA256 = "ef8ab61a58a080f2c2a53deeda39575cfd0a3ad1c4e79f6bf4f463c13986bed1"
     static let url = URL(string: "https://downloads.example.invalid/demo-engine")!
 
-    static func manifest(sha256: String = payloadSHA256, size: Int64 = 30, version: String? = "1.0") -> EngineManifest {
+    static func manifest(sha256: String = payloadSHA256, size: Int64 = 30, version: String? = "1.0", payload: EnginePayload = .executable(fileName: "demo")) -> EngineManifest {
         EngineManifest(
             id: "demo-engine",
             displayName: "Demo",
@@ -20,7 +22,7 @@ struct EngineStoreTests {
             artifacts: [
                 EngineArtifact(
                     architecture: .current, url: url, sha256: sha256, sizeBytes: size,
-                    payload: .executable(fileName: "demo"))
+                    payload: payload)
             ]
         )
     }
@@ -47,7 +49,7 @@ struct EngineStoreTests {
             #expect(receipt.sizeBytes == 30)
             #expect(receipt.version == "1.0")
 
-            let executable = try #require(store.executableURL(for: "demo-engine"))
+            let executable = try #require(store.executableURL(for: manifest))
             #expect(FileManager.default.isExecutableFile(atPath: executable.path))
             #expect(try Data(contentsOf: executable) == Self.payload)
             #expect(store.status(of: manifest).isInstalled)
@@ -68,7 +70,7 @@ struct EngineStoreTests {
                 try await store.install(manifest)
             }
             #expect(store.receipt(for: "demo-engine") == nil)
-            #expect(store.executableURL(for: "demo-engine") == nil)
+            #expect(store.executableURL(for: manifest) == nil)
             #expect(!FileManager.default.fileExists(atPath: store.rootDirectory.appending(path: "demo-engine").path))
         }
     }
@@ -96,13 +98,155 @@ struct EngineStoreTests {
     }
 
     @Test func sharedEngineIsInstalledOncePerID() async throws {
-        let tools = [
-            ToolDescriptor(id: "a", category: .media, title: "A", summary: "", symbolName: "", requiredEngines: ["x", "y"]),
-            ToolDescriptor(id: "b", category: .media, title: "B", summary: "", symbolName: "", requiredEngines: ["y", "x"]),
-            ToolDescriptor(id: "c", category: .developer, title: "C", summary: "", symbolName: ""),
-        ]
-        #expect(ToolCatalog.engines(requiredBy: tools) == ["x", "y"])
-        #expect(ToolCatalog.tools(requiring: "y", from: tools).map(\.id) == ["a", "b"])
+        try await withTemporaryDirectory { directory in
+            let (store, downloader) = try Self.makeStore(in: directory)
+            let manifest = Self.manifest()
+            let tools = [
+                ToolDescriptor(id: "a", category: .media, title: "A", summary: "", symbolName: "", requiredEngines: [manifest.id]),
+                ToolDescriptor(id: "b", category: .media, title: "B", summary: "", symbolName: "", requiredEngines: [manifest.id]),
+            ]
+            let users = ToolCatalog.tools(requiring: manifest.id, from: tools)
+            #expect(users.map(\.id) == ["a", "b"])
+            let otherStore = EngineStore(rootDirectory: store.rootDirectory, downloader: downloader)
+            async let first = store.install(manifest)
+            async let second = otherStore.install(manifest)
+            let (firstReceipt, secondReceipt) = try await (first, second)
+            #expect(firstReceipt == secondReceipt)
+            #expect(downloader.requests == [Self.url])
+            #expect(ToolCatalog.engines(requiredBy: tools) == [manifest.id])
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func redirectedStoreCannotRemoveAnInstallation(redirectAncestor: Bool) async throws {
+        try await withTemporaryDirectory { directory in
+            let fm = FileManager.default
+            let parent = directory.appending(path: "parent")
+            try fm.createDirectory(at: parent, withIntermediateDirectories: false)
+            let (store, downloader) = try Self.makeStore(in: parent)
+            let manifest = Self.manifest()
+            try await store.install(manifest)
+
+            let redirected = redirectAncestor ? parent : store.rootDirectory
+            let moved = directory.appending(path: "outside")
+            try fm.moveItem(at: redirected, to: moved)
+            try fm.createSymbolicLink(at: redirected, withDestinationURL: moved)
+
+            #expect(throws: POSIXError.self) { try store.uninstall(manifest.id) }
+            await #expect(throws: POSIXError.self) {
+                try await store.install(Self.manifest(version: "2.0"))
+            }
+            #expect(downloader.requests == [Self.url])
+            let outsideRoot = redirectAncestor ? moved.appending(path: "engines") : moved
+            let outsideEngine = outsideRoot.appending(path: manifest.id).appending(path: "files/demo")
+            #expect(try Data(contentsOf: outsideEngine) == Self.payload)
+            #expect(store.executableURL(for: manifest) == nil)
+        }
+    }
+
+    @Test func installAndUninstallPreserveUnrecognizedDirectory() async throws {
+        try await withTemporaryDirectory { directory in
+            let (store, downloader) = try Self.makeStore(in: directory)
+            let manifest = Self.manifest()
+            let engine = store.rootDirectory.appending(path: manifest.id)
+            try FileManager.default.createDirectory(at: engine, withIntermediateDirectories: true)
+            let unrelated = engine.appending(path: "unrelated")
+            try Self.payload.write(to: unrelated)
+            #expect(throws: EngineStoreError.unrecognizedInstallation(manifest.id)) {
+                try store.uninstall(manifest.id)
+            }
+            await #expect(throws: EngineStoreError.unrecognizedInstallation(manifest.id)) {
+                try await store.install(manifest)
+            }
+            #expect(try Data(contentsOf: unrelated) == Self.payload)
+            #expect(downloader.requests.isEmpty)
+        }
+    }
+
+    @Test(arguments: ["receiptID", "receiptPath", "receiptSource", "fileSymlink", "directorySymlink", "directory"])
+    func executableLookupRequiresMatchingReceiptAndRegularFile(tamper: String) async throws {
+        try await withTemporaryDirectory { directory in
+            let (store, _) = try Self.makeStore(in: directory)
+            let manifest = Self.manifest()
+            try await store.install(manifest)
+            let engine = store.rootDirectory.appending(path: manifest.id)
+            let files = engine.appending(path: "files")
+            let executable = try #require(store.executableURL(for: manifest))
+            let fm = FileManager.default
+            let outside = directory.appending(path: "outside")
+            try fm.createDirectory(at: outside, withIntermediateDirectories: false)
+            let outsideFile = outside.appending(path: "demo")
+            try fm.copyItem(at: executable, to: outsideFile)
+            switch tamper {
+            case "fileSymlink":
+                try fm.removeItem(at: executable)
+                try fm.createSymbolicLink(at: executable, withDestinationURL: outsideFile)
+            case "directorySymlink":
+                try fm.removeItem(at: files)
+                try fm.createSymbolicLink(at: files, withDestinationURL: outside)
+            case "directory":
+                try fm.removeItem(at: executable)
+                try fm.createDirectory(at: executable, withIntermediateDirectories: false)
+            default:
+                let record = engine.appending(path: "receipt.json")
+                var json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: record)) as? [String: Any])
+                if tamper == "receiptID" { json["engineID"] = "another-engine" }
+                if tamper == "receiptPath" { json["executableRelativePath"] = "../../../outside/demo" }
+                if tamper == "receiptSource" { json["sourceURL"] = "https://example.invalid/other-build" }
+                try JSONSerialization.data(withJSONObject: json).write(to: record)
+            }
+            #expect(store.executableURL(for: manifest) == nil)
+            #expect(store.status(of: manifest) == .damaged)
+        }
+    }
+
+    @Test func failedAtomicUpdateLeavesPreviousBuildInPlace() async throws {
+        try await withTemporaryDirectory { directory in
+            let (store, _) = try Self.makeStore(in: directory)
+            let original = Self.manifest()
+            let newer = Self.manifest(version: "2.0")
+            let oldReceipt = try await store.install(original)
+            let stagingRoot = store.rootDirectory.appending(path: ".staging")
+            var immutablePath: String?
+            defer {
+                if let immutablePath { _ = chflags(immutablePath, 0) }
+            }
+
+            do {
+                try await store.install(newer, progress: { _ in }) { checkpoint in
+                    guard checkpoint == .willPublish else { return }
+                    let staging = try #require(FileManager.default.contentsOfDirectory(
+                        at: stagingRoot, includingPropertiesForKeys: nil).first)
+                    let candidate = staging.appending(path: "engine").path
+                    try #require(chflags(candidate, UInt32(UF_IMMUTABLE)) == 0)
+                    immutablePath = candidate
+                }
+                Issue.record("Expected an immutable staging directory to prevent publication")
+            } catch let error as POSIXError {
+                #expect(error.code == .EPERM || error.code == .EACCES)
+            }
+
+            #expect(store.status(of: original) == .installed(oldReceipt))
+            let executable = try #require(store.executableURL(for: original))
+            #expect(try Data(contentsOf: executable) == Self.payload)
+        }
+    }
+
+    @Test func uninstallCannotInterleaveWithAnotherStoresInstall() async throws {
+        try await withTemporaryDirectory { directory in
+            let (store, downloader) = try Self.makeStore(in: directory)
+            let otherStore = EngineStore(rootDirectory: store.rootDirectory, downloader: downloader)
+            let manifest = Self.manifest()
+            try await store.install(manifest, progress: { _ in }) { checkpoint in
+                guard checkpoint == .willPublish else { return }
+                #expect(throws: EngineStoreError.operationInProgress(manifest.id)) {
+                    try otherStore.uninstall(manifest.id)
+                }
+            }
+            #expect(store.status(of: manifest).isInstalled)
+            try otherStore.uninstall(manifest.id)
+            #expect(store.status(of: manifest) == .notInstalled(manifest.artifacts[0]))
+        }
     }
 
     @Test func uninstallRemovesEverything() async throws {
@@ -128,18 +272,22 @@ struct EngineStoreTests {
                 return
             }
             #expect(installed.version == "1.0")
+            #expect(store.executableURL(for: newer) == nil)
         }
     }
 
     @Test func unpinnedEngineIsUnavailable() async throws {
         try await withTemporaryDirectory { directory in
             let (store, downloader) = try Self.makeStore(in: directory)
+            let pinned = Self.manifest()
+            try await store.install(pinned)
             let manifest = Self.manifest(version: nil)
             #expect(store.status(of: manifest) == .unavailable)
             await #expect(throws: EngineStoreError.unavailable("demo-engine")) {
                 try await store.install(manifest)
             }
-            #expect(downloader.requests.isEmpty)
+            #expect(store.executableURL(for: manifest) == nil)
+            #expect(downloader.requests == [Self.url])
         }
     }
 
@@ -153,11 +301,103 @@ struct EngineStoreTests {
         #expect(EngineManifest.isValidID(id))
     }
 
-    @Test func unsafeArchivePathsAreRejected() {
-        #expect(!EngineStore.isSafeRelativePath("../bin/ffmpeg"))
-        #expect(!EngineStore.isSafeRelativePath("/usr/bin/ffmpeg"))
-        #expect(!EngineStore.isSafeRelativePath("bin//ffmpeg"))
-        #expect(EngineStore.isSafeRelativePath("bin/ffmpeg"))
+    static func zipFixture(in directory: URL, outwardLink: Bool = false, extraEntries: Int = 0)
+        throws -> (EngineStore, EngineManifest, Data)
+    {
+        let fm = FileManager.default
+        let source = directory.appending(path: "source")
+        try fm.createDirectory(at: source.appending(path: "bin"), withIntermediateDirectories: true)
+        let contents = Data(repeating: 42, count: 160_000)
+        try contents.write(to: source.appending(path: "bin/demo"))
+        try Data("README".utf8).write(to: source.appending(path: "README"))
+        for index in 0..<extraEntries {
+            try Data().write(to: source.appending(path: "extra-\(index)"))
+        }
+        if outwardLink {
+            try fm.createSymbolicLink(atPath: source.appending(path: "outside").path, withDestinationPath: "../outside")
+        }
+        let archive = directory.appending(path: "fixture.zip")
+        let zip = Process()
+        zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        zip.currentDirectoryURL = source
+        zip.arguments = ["-q", "-r", "-y", archive.path, "."]
+        try zip.run()
+        zip.waitUntilExit()
+        try #require(zip.terminationStatus == 0)
+        let manifest = Self.manifest(
+            sha256: try HashGenerator.hashFile(at: archive, algorithm: .sha256),
+            size: Int64(try Data(contentsOf: archive).count),
+            payload: .zip(executablePath: "bin/demo"))
+        let store = EngineStore(rootDirectory: directory.appending(path: "engines"),
+                                downloader: LocalFileDownloader(files: [Self.url: archive]))
+        return (store, manifest, contents)
+    }
+
+    @Test func installsStoredAndDeflatedFilesFromRealZIP() async throws {
+        try await withTemporaryDirectory { directory in
+            let (store, manifest, contents) = try Self.zipFixture(in: directory)
+            try await store.install(manifest)
+            let executable = try #require(store.executableURL(for: manifest))
+            #expect(try Data(contentsOf: executable) == contents)
+            let readme = executable.deletingLastPathComponent().deletingLastPathComponent().appending(path: "README")
+            #expect(try Data(contentsOf: readme) == Data("README".utf8))
+        }
+    }
+
+    @Test func rejectsRealZIPWithUnrelatedOutwardSymlink() async throws {
+        try await withTemporaryDirectory { directory in
+            let (store, manifest, _) = try Self.zipFixture(in: directory, outwardLink: true)
+            await #expect(throws: EngineStoreError.unsafeArchivePath("outside")) {
+                try await store.install(manifest)
+            }
+            #expect(store.status(of: manifest) == .notInstalled(manifest.artifacts[0]))
+        }
+    }
+
+    @Test func rejectsRealZIPOverEntryLimit() async throws {
+        try await withTemporaryDirectory { directory in
+            let (store, manifest, _) = try Self.zipFixture(in: directory, extraEntries: 4_097)
+            await #expect(throws: EngineStoreError.archiveLimitExceeded) {
+                try await store.install(manifest)
+            }
+            #expect(store.status(of: manifest) == .notInstalled(manifest.artifacts[0]))
+        }
+    }
+
+    @Test(arguments: EngineStore.InstallationCheckpoint.allCases)
+    func cancelledInstallDoesNotPublish(checkpoint: EngineStore.InstallationCheckpoint) async throws {
+        try await withTemporaryDirectory { directory in
+            let (store, manifest, _) = try Self.zipFixture(in: directory)
+            // Cancel a child so cancellation doesn't propagate to the test runner.
+            let installation = Task {
+                try await store.install(manifest, progress: { _ in }) { reached in
+                    if reached == checkpoint { withUnsafeCurrentTask { $0?.cancel() } }
+                }
+            }
+            await #expect(throws: CancellationError.self) { try await installation.value }
+            #expect(store.status(of: manifest) == .notInstalled(manifest.artifacts[0]))
+            let staging = store.rootDirectory.appending(path: ".staging")
+            #expect(try FileManager.default.contentsOfDirectory(atPath: staging.path).isEmpty)
+        }
+    }
+
+    @Test func downloaderRejectsDowngradeRedirectAndInsecureFinalResponse() throws {
+        let insecure = try #require(URL(string: "http://example.invalid/engine"))
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let task = session.downloadTask(with: Self.url)
+        let observation = RedirectObservation()
+        let delegate = EngineDownloadDelegate(destination: insecure, progress: { _ in })
+        let redirect = try #require(HTTPURLResponse(url: Self.url, statusCode: 302, httpVersion: nil, headerFields: nil))
+        delegate.urlSession(session, task: task, willPerformHTTPRedirection: redirect,
+                            newRequest: URLRequest(url: insecure)) { observation.record($0) }
+        #expect(observation.wasRejected)
+        let received = try #require(HTTPURLResponse(url: insecure, statusCode: 200, httpVersion: nil, headerFields: nil))
+        #expect(throws: EngineDownloadError.insecureURL(insecure)) {
+            try EngineDownloadDelegate.validateResponse(received)
+        }
+        try EngineDownloadDelegate.validateResponse(HTTPURLResponse(
+            url: Self.url, statusCode: 200, httpVersion: nil, headerFields: nil))
     }
 
     @Test func manifestRoundTripsThroughJSON() throws {
@@ -183,5 +423,15 @@ struct EngineStoreTests {
                 #expect(engineIDs.contains(engine), "\(tool.id) requires unknown engine \(engine)")
             }
         }
+    }
+}
+
+private final class RedirectObservation: Sendable {
+    private let result = OSAllocatedUnfairLock(initialState: false)
+
+    var wasRejected: Bool { self.result.withLock { $0 } }
+
+    func record(_ request: URLRequest?) {
+        self.result.withLock { $0 = request == nil }
     }
 }

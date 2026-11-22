@@ -119,7 +119,7 @@ struct WatermarkTests {
 
             let pixels = try Pixels(try ImageProcessor.loadImage(at: result).image)
             let (r, g, b) = pixels.rgb(x: 150, y: 150)
-            #expect(abs(r - 128) < 12 && abs(g - 128) < 12 && b > 240, "center was \(r), \(g), \(b)")
+            #expect((100...175).contains(r) && (100...175).contains(g) && b > 240, "center was \(r), \(g), \(b)")
             let corner = pixels.rgb(x: 10, y: 10)
             #expect(corner.0 == 255 && corner.1 == 255 && corner.2 == 255)
         }

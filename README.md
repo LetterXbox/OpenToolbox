@@ -19,7 +19,8 @@ An open-source, pure native macOS (Swift / SwiftUI) utility suite designed aroun
 - [x] Built-in Image & PDF tools via Apple frameworks (Convert/Resize/Rotate, Strip EXIF, Remove Background, Blur Faces, Merge/Split/Extract/Rotate PDF pages, Images ↔ PDF, OCR)
 - [ ] Visual PDF page organizer (drag to reorder, delete pages)
 - [x] Core Mac utilities (Keep Awake, Battery Health, Network Speed Test, Eject All Disks, Quarantine Helper, Hidden Settings)
-- [ ] Signed, notarized `.app` bundle and release build (includes the Xcode application target)
+- [ ] Signed, notarized `.app` bundle and release build
+- [ ] Xcode application target (proposed to ship with the signed bundle; awaiting owner confirmation)
 
 ### v0.1.1 — Known v0.1 limitations to close
 - [ ] Find Duplicates → Move to Trash: report "uncertain" instead of auto-recovering when the trashed item cannot be proven to be the reviewed file (two coincident races; see `docs/reviews/resolver-trash-recovery.md`)

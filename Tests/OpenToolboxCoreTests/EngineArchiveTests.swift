@@ -118,6 +118,7 @@ struct EngineArchiveTests {
                 (name: ".", mode: S_IFDIR | 0o755, data: Data()),
                 (name: "./usr/local/bin/other-link", mode: S_IFLNK | 0o777, data: Data("/etc/passwd".utf8)),
                 (name: "./usr/local/bin/gs-noX11", mode: S_IFREG | 0o755, data: gsBinary),
+                (name: "./usr/local/bin/._gs-noX11", mode: S_IFREG | 0o644, data: Data([0x00, 0x05, 0x16, 0x07])),
                 (name: "./usr/local/bin/gs-X11", mode: S_IFREG | 0o755, data: Data("ignored".utf8)),
             ])
             let pkgData = try Self.makePKG(payloadPath: "Sub.pkg/Payload", cpioData: cpio)

@@ -37,10 +37,22 @@ public struct PDFCompressionResult: Equatable, Sendable {
     }
 }
 
+public struct GhostscriptResources: Equatable, Sendable {
+    public let searchPaths: [String]
+    public let genericResourceDir: String?
+    public let iccProfilesDir: String?
+
+    public init(searchPaths: [String] = [], genericResourceDir: String? = nil, iccProfilesDir: String? = nil) {
+        self.searchPaths = searchPaths
+        self.genericResourceDir = genericResourceDir
+        self.iccProfilesDir = iccProfilesDir
+    }
+}
+
 public enum PDFCompressor {
     public typealias Runner = @Sendable (URL, [String]) async throws -> EngineProcessResult
 
-    public static func resourceSearchPaths(for executable: URL) -> [String] {
+    public static func resources(for executable: URL) -> GhostscriptResources {
         let prefix = executable
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -50,26 +62,46 @@ public enum PDFCompressor {
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         ) else {
-            return []
+            return GhostscriptResources()
         }
-        var paths: [String] = []
+        var searchPaths: [String] = []
+        var genericResourceDir: String?
+        var iccProfilesDir: String?
         for versionDir in versions.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             for sub in ["Resource/Init", "lib", "Resource/Font"] {
                 let candidate = versionDir.appending(path: sub, directoryHint: .isDirectory)
                 var isDir: ObjCBool = false
                 if FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDir), isDir.boolValue {
-                    paths.append(candidate.path)
+                    searchPaths.append(candidate.path)
+                }
+            }
+            if genericResourceDir == nil {
+                let resDir = versionDir.appending(path: "Resource", directoryHint: .isDirectory)
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: resDir.path, isDirectory: &isDir), isDir.boolValue {
+                    genericResourceDir = resDir.path.hasSuffix("/") ? resDir.path : resDir.path + "/"
+                }
+            }
+            if iccProfilesDir == nil {
+                let iccDir = versionDir.appending(path: "iccprofiles", directoryHint: .isDirectory)
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: iccDir.path, isDirectory: &isDir), isDir.boolValue {
+                    iccProfilesDir = iccDir.path.hasSuffix("/") ? iccDir.path : iccDir.path + "/"
                 }
             }
         }
-        return paths
+        return GhostscriptResources(
+            searchPaths: searchPaths,
+            genericResourceDir: genericResourceDir,
+            iccProfilesDir: iccProfilesDir
+        )
     }
 
     public static func arguments(
         input: URL,
         output: URL,
         preset: PDFCompressionPreset,
-        resourcePaths: [String] = []
+        resources: GhostscriptResources = GhostscriptResources()
     ) -> [String] {
         var args = [
             "-dSAFER",
@@ -77,8 +109,14 @@ public enum PDFCompressor {
             "-dNOPAUSE",
             "-dQUIET",
         ]
-        if !resourcePaths.isEmpty {
-            args.append("-I\(resourcePaths.joined(separator: ":"))")
+        if !resources.searchPaths.isEmpty {
+            args.append("-I\(resources.searchPaths.joined(separator: ":"))")
+        }
+        if let genericResourceDir = resources.genericResourceDir {
+            args.append("-sGenericResourceDir=\(genericResourceDir)")
+        }
+        if let iccProfilesDir = resources.iccProfilesDir {
+            args.append("-sICCProfilesDir=\(iccProfilesDir)")
         }
         args += [
             "-sDEVICE=pdfwrite",
@@ -111,8 +149,8 @@ public enum PDFCompressor {
         defer { try? FileManager.default.removeItem(at: staging) }
 
         let tempOutput = staging.appending(path: "compressed.pdf", directoryHint: .notDirectory)
-        let resources = resourceSearchPaths(for: executable)
-        let args = arguments(input: source, output: tempOutput, preset: preset, resourcePaths: resources)
+        let gsResources = resources(for: executable)
+        let args = arguments(input: source, output: tempOutput, preset: preset, resources: gsResources)
         let result = try await runner(executable, args)
         guard result.exitCode == 0 else {
             throw EngineProcessError.failed(

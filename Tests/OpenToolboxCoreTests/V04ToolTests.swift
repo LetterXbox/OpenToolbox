@@ -42,20 +42,26 @@ struct V04ToolTests {
             let fakeBin = directory.appending(path: "usr/local/bin/gs-noX11")
             let fakeInit = directory.appending(path: "usr/local/share/ghostscript/10.07.1/Resource/Init")
             let fakeLib = directory.appending(path: "usr/local/share/ghostscript/10.07.1/lib")
+            let fakeICC = directory.appending(path: "usr/local/share/ghostscript/10.07.1/iccprofiles")
             try FileManager.default.createDirectory(at: fakeInit, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: fakeLib, withIntermediateDirectories: true)
-            let discovered = PDFCompressor.resourceSearchPaths(for: fakeBin)
-            #expect(discovered == [fakeInit.path, fakeLib.path])
+            try FileManager.default.createDirectory(at: fakeICC, withIntermediateDirectories: true)
+            let discovered = PDFCompressor.resources(for: fakeBin)
+            #expect(discovered.searchPaths == [fakeInit.path, fakeLib.path])
+            #expect(discovered.genericResourceDir?.hasSuffix("/Resource/") == true)
+            #expect(discovered.iccProfilesDir?.hasSuffix("/iccprofiles/") == true)
 
             let args = PDFCompressor.arguments(
                 input: sample,
                 output: directory.appending(path: "out.pdf"),
                 preset: .ebook,
-                resourcePaths: discovered
+                resources: discovered
             )
             #expect(args.contains("-dSAFER"))
             #expect(args.contains("-dPDFSETTINGS=/ebook"))
             #expect(args.contains("-I\(fakeInit.path):\(fakeLib.path)"))
+            #expect(args.contains { $0.hasPrefix("-sGenericResourceDir=") && $0.hasSuffix("/Resource/") })
+            #expect(args.contains { $0.hasPrefix("-sICCProfilesDir=") && $0.hasSuffix("/iccprofiles/") })
             #expect(args.contains("--"))
 
             let output = OutputDirectory(baseDirectory: directory.appending(path: "out"))

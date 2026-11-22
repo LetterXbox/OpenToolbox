@@ -17,14 +17,14 @@
 
 ---
 
-OpenToolbox brings 51 everyday utilities together in a single Swift and SwiftUI app for macOS 15+. Everything built in runs locally on your Mac using Apple frameworks, and tools that export processed files write to a dedicated output folder so your originals stay untouched (except when you explicitly act on existing files, such as choosing **Rename in place** in Batch Rename, moving selected copies to Trash in Find Duplicates, or clearing the quarantine flag in Quarantine Helper).
+OpenToolbox brings 74 everyday utilities together in a single Swift and SwiftUI app for macOS 15+. Built-in tools run locally on your Mac using Apple frameworks, and tools that need heavier open-source engines (**FFmpeg**, **FFprobe**, **yt-dlp**, **7-Zip**, and **Ghostscript**) download them only when you ask. Tools that export processed files write to a dedicated output folder so your originals stay untouched (except when you explicitly act on existing files, such as choosing **Rename in place** in Batch Rename, moving selected copies to Trash in Find Duplicates, or clearing the quarantine flag in Quarantine Helper).
 
 ## Why OpenToolbox
 
-- **Pure native macOS (macOS 15+):** Built with Swift, SwiftUI, and Apple frameworks (Vision, PDFKit, ImageIO, AVFoundation, ScreenCaptureKit, Speech, Translation, and Foundation Models)—no Electron, no web wrappers, and universal binaries for Apple silicon and Intel.
-- **Private and offline by default:** No accounts, no telemetry, and no file uploads. All processing—including **Translate**, **Transcribe**, and **Summarize**—happens on your Mac. OpenToolbox connects to the network only when you explicitly start an online action: downloading on-demand engines, running **Network Speed Test**, checking for or downloading updates, loading a URL in **Web Page to PDF**, showing or searching the map in **Coordinate Picker** (Apple Maps), or clicking **Find Network Scanners** in **Scan Document**. You can also opt in to daily automatic update checks; a second opt-in lets OpenToolbox download an available update's disk image after a daily check without a further click and install it when you restart or quit (both are off by default). For **Translate** and (on macOS 26+) **Transcribe**, macOS may download an on-device language pack the first time you use a language.
+- **Pure native macOS (macOS 15+):** Built with Swift, SwiftUI, and Apple frameworks (Vision, PDFKit, ImageIO, AVFoundation, ScreenCaptureKit, Speech, Translation, Quick Look, WebKit, and Foundation Models)—no Electron, no web wrappers, and universal binaries for Apple silicon and Intel.
+- **Private and offline by default:** No accounts, no telemetry, and no file uploads. All built-in tools—including **Translate**, **Transcribe**, **Summarize**, **Markdown to PDF**, and **Word / PowerPoint / Excel to PDF**—process files locally on your Mac. OpenToolbox connects to the network only when you explicitly start an online action: downloading on-demand engines, downloading a media URL in **Download Video**, running **Network Speed Test**, checking for or downloading updates, loading a URL in **Web Page to PDF**, showing or searching the map in **Coordinate Picker** (Apple Maps), or clicking **Find Network Scanners** in **Scan Document**. You can also opt in to daily automatic update checks; a second opt-in lets OpenToolbox download an available update's disk image after a daily check without a further click and install it when you restart or quit (both are off by default). For **Translate** and (on macOS 26+) **Transcribe**, macOS may download an on-device language pack the first time you use a language.
 - **Originals stay untouched:** Tools that export processed copies write new, collision-safe files into `<output folder>/<yyyy-MM-dd>/<tool>/` rather than overwriting your source files. Actions that modify or remove existing files happen only when you explicitly choose them—such as **Batch Rename**'s **Rename in place** mode (which supports undo), **Find Duplicates** moving selected copies to Trash, and **Quarantine Helper** clearing a file's quarantine flag in place.
-- **On-demand external engines:** Built-in tools work out of the box with zero extra downloads. External CLI engines are never bundled; when available, they download only on request, are verified by SHA-256, shared across tools, and removable in one click.
+- **On-demand external engines:** Built-in tools work out of the box with zero extra downloads. External CLI engines are never bundled; tools requiring them start disabled in the **Tool Catalog** and only download pinned, SHA-256-verified builds on request in the **Engine Manager**, shared across tools and removable in one click.
 
 ## Highlights
 
@@ -68,10 +68,12 @@ OpenToolbox brings 51 everyday utilities together in a single Swift and SwiftUI 
 | **Text to Speech** | Read text aloud with any installed voice, or save it as an audio file. |
 | **Transcribe** | Turn speech in audio and video files into text or subtitles (SRT, WebVTT), on-device. |
 | **Summarize** | Summarize text and documents on-device with Apple Intelligence (macOS 26+ on Macs with Apple Intelligence). |
+| **Zip & Unzip** | Create ZIP, 7z, and TAR archives (with optional password encryption for ZIP/7z) and extract ZIP, 7z, RAR, and TAR archives *(on-demand `7zz`)*. |
+| **Convert Documents** | Convert documents between DOCX, RTF, HTML, ODT, TXT, Markdown, and PDF offline. |
 
 ### Images & PDF
 
-Powered on-device by Apple's Vision, PDFKit, ImageIO, Image Capture, and WebKit frameworks:
+Powered on-device by Apple's Vision, PDFKit, ImageIO, Image Capture, Quick Look, and WebKit frameworks, plus on-demand Ghostscript for PDF compression:
 
 | Tool | Description |
 | --- | --- |
@@ -89,6 +91,11 @@ Powered on-device by Apple's Vision, PDFKit, ImageIO, Image Capture, and WebKit 
 | **Fill & Flatten Forms** | Fill in PDF forms and save a filled or flattened copy. |
 | **Scan Document** | Scan pages from a scanner or a nearby iPhone or iPad (Continuity Camera) into a PDF. |
 | **Web Page to PDF** | Save a web page as A4 or US Letter pages, or as one long page. |
+| **Compress PDF** | Shrink PDF file sizes by downsampling images and optimizing streams; copies that wouldn't be smaller are not saved *(on-demand `ghostscript`)*. |
+| **Markdown to PDF** | Convert Markdown files or pasted text (including GitHub-flavored tables and task lists) into formatted PDFs offline. |
+| **Word to PDF** | Convert `.docx`, `.doc`, `.odt`, and `.rtf` documents to PDF offline via macOS Quick Look and WebKit. |
+| **PowerPoint to PDF** | Convert `.pptx` and `.ppt` presentations to PDF offline via macOS Quick Look and WebKit. |
+| **Excel to PDF** | Convert `.xlsx` and `.xls` spreadsheets to PDF offline via macOS Quick Look and WebKit. |
 
 ### Mac Utilities
 
@@ -112,10 +119,31 @@ Powered on-device by Apple's Vision, PDFKit, ImageIO, Image Capture, and WebKit 
 | **Record Audio** | Record sound from the microphone you choose to an AAC audio file. |
 | **Trim Audio** | Cut the start and end off an audio file (WAV, AIFF, and CAF keep their format and encoding; other formats save as AAC). |
 | **Extract Frames** | Save frames from videos as images: spread evenly, every few seconds, or at set times. |
+| **Compress Video** | Shrink video file sizes with H.264 or HEVC and optional max resolution *(on-demand `ffmpeg`, `ffprobe`)*. |
+| **Convert Video** | Convert videos between MP4, MOV, MKV, WebM, AVI, and M4V *(on-demand `ffmpeg`, `ffprobe`)*. |
+| **Resize Video** | Scale videos to 4K, 1080p, 720p, 480p, 360p, or custom dimensions *(on-demand `ffmpeg`, `ffprobe`)*. |
+| **Crop & Rotate Video** | Crop by aspect ratio or custom region, rotate, or flip videos *(on-demand `ffmpeg`, `ffprobe`)*. |
+| **Trim Video** | Cut a start and end range from a video using fast stream copy or frame-accurate re-encoding *(on-demand `ffmpeg`, `ffprobe`)*. |
+| **Merge Videos** | Join two or more videos in order with stream copy or normalized re-encoding *(on-demand `ffmpeg`, `ffprobe`)*. |
+| **Mute Video** | Remove audio tracks from videos without re-encoding *(on-demand `ffmpeg`)*. |
+| **Replace Audio** | Swap or add an audio track onto a video, with optional audio looping *(on-demand `ffmpeg`, `ffprobe`)*. |
+| **Change Video Speed** | Speed up or slow down video and audio from 0.25× to 4× *(on-demand `ffmpeg`, `ffprobe`)*. |
+| **Video to GIF** | Create two-pass palette-optimized animated GIFs with custom frame rate, width, and trim range *(on-demand `ffmpeg`, `ffprobe`)*. |
+| **Burn In Subtitles** | Hardcode `.srt`, `.ass`, `.ssa`, or `.vtt` subtitles onto videos *(on-demand `ffmpeg`, `ffprobe`)*. |
+| **Media Info** | Inspect container metadata, duration, bitrate, and video/audio/subtitle streams, with copyable JSON *(on-demand `ffprobe`)*. |
+| **Convert Audio** | Convert audio files between M4A, MP3, WAV, FLAC, OGG, Opus, and AIFF *(on-demand `ffmpeg`, `ffprobe`)*. |
+| **Extract Audio** | Save the audio track from a video as M4A, MP3, WAV, FLAC, OGG, Opus, or AIFF *(on-demand `ffmpeg`, `ffprobe`)*. |
+| **Clean Up Audio** | Reduce background noise, remove low rumble, tame harsh highs, and normalize loudness (EBU R128) on audio or video files *(on-demand `ffmpeg`, `ffprobe`)*. |
+| **Download Video** | Download video (best, 1080p, 720p) or audio-only (M4A, MP3) with optional English subtitles from supported websites *(on-demand `yt-dlp`, `ffmpeg`)*. |
 
-#### Planned (On-Demand Engines)
+#### On-Demand Engines
 
-- **Tool Catalog** lists **Convert Video & Audio** (`ffmpeg`) and **Download Video** (`yt-dlp`) as **Planned**, and **Engine Manager** lists their engines as **Coming soon**; neither tool can be enabled in v0.3.0.
+Tools that rely on external CLI programs start disabled in **Tool Catalog** and download nothing automatically. Install or remove pinned, SHA-256-verified builds individually in **Engines**:
+
+- **FFmpeg** 9.1 (GPL-3.0-or-later) and **FFprobe** 9.1 (GPL-3.0-or-later)
+- **yt-dlp** 2026.10.26 (Unlicense)
+- **7-Zip (`7zz`)** 26.06 (LGPL-2.1-or-later, BSD-3-Clause)
+- **Ghostscript** 10.07.1 (AGPL-3.0-or-later)
 
 ## Install
 
@@ -157,6 +185,10 @@ Choose **OpenToolbox → Check for Updates…** to check GitHub Releases manuall
 - **Summarize and Transcribe system limits:** **Summarize** requires macOS 26 or later on a Mac with Apple Intelligence turned on. **Transcribe** uses Apple's newer speech engine on macOS 26 or later and the older on-device speech recognizer on earlier versions; the languages it offers depend on the recognizer your macOS version uses.
 - **Scan Document sources:** Works with scanners macOS supports through Image Capture, and with an iPhone or iPad through **File → Import from iPhone or iPad**.
 - **Web Page to PDF rendering:** Pages load without your browser cookies or logins, so pages behind a sign-in save as their sign-in page. Splitting a page into A4 or US Letter pages can cut a line of text across two pages.
+- **Office & Markdown to PDF rendering:** **Word to PDF**, **PowerPoint to PDF**, **Excel to PDF**, and PDF exports in **Convert Documents** render files completely offline using macOS Quick Look (with `textutil` fallback for Word/RTF/ODT) and WebKit. Complex Office layouts, fonts, animations, or multi-sheet pagination may differ from Microsoft Office or LibreOffice. Remote images and external resources in Markdown and HTML are blocked during offline rendering.
+- **Compress PDF:** Uses Ghostscript (`-dSAFER`) to downsample images and optimize streams; copies that wouldn't be smaller are not saved, and password-protected PDFs must be unlocked first.
+- **Zip & Unzip archive safety:** Extracted archives containing symlinks, hardlinks, or special files are refused rather than published.
+- **Download Video:** Uses on-demand `yt-dlp` and `ffmpeg` for supported websites; upstream site changes may require a newer `yt-dlp` build.
 - **Closing windows during active jobs:** Closing a window stops a Network Speed Test, Disk Speed Test, or duplicate scan running in that window. File batches already under way (such as image conversion or watermarking) finish as long as OpenToolbox remains running; with the menu bar icon off, closing the last window quits the app.
 - **Image and Watermark format limits:** Animated GIFs and multipage TIFFs (images with several frames or pages) are refused by Watermark and Compress Images. Watermarked PDFs keep vector graphics and searchable text, but links, form fields, comments, and outlines are not preserved as interactive elements.
 - **Updates apply on restart/quit:** While OpenToolbox stays open in the menu bar, a downloaded update waits until you choose **Restart to Update** or quit.

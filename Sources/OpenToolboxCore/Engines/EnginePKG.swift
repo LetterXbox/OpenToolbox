@@ -271,7 +271,8 @@ enum EnginePKG {
             let fileType = mode_t(mode) & S_IFMT
             let isDirectory = fileType == S_IFDIR
             let cleaned = EnginePKG.stripLeadingDotSlash(name, stripTrailingSlash: isDirectory)
-            guard matchesIncludedPrefix(cleaned) else {
+            let baseName = cleaned.split(separator: "/").last.map(String.init) ?? ""
+            guard matchesIncludedPrefix(cleaned), !baseName.hasPrefix("._") else {
                 state = fileSize > 0 ? .skipBody(remaining: fileSize) : .header
                 return
             }

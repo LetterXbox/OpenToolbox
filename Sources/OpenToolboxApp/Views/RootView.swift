@@ -53,7 +53,7 @@ struct SidebarView: View {
             }
         }
         .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 320)
-        .safeAreaInset(edge: .bottom) {
+        .sidebarBottomBar {
             Button {
                 model.isCommandPaletteVisible = true
             } label: {
@@ -69,6 +69,17 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
             .padding(10)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func sidebarBottomBar<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        if #available(macOS 26, *) {
+            safeAreaBar(edge: .bottom, content: content)
+        } else {
+            safeAreaInset(edge: .bottom, content: content)
         }
     }
 }

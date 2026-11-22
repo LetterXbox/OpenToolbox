@@ -17,7 +17,7 @@ enum EngineTarXZ {
         didExtractChunk: () throws -> Void
     ) throws {
         guard size >= 32 else { throw EngineStoreError.invalidArchive }
-        var parser = TarParser(root: directory, didExtractChunk: didExtractChunk)
+        var parser = TarParser(root: directory)
 
         let stream = UnsafeMutablePointer<compression_stream>.allocate(capacity: 1)
         defer { stream.deallocate() }
@@ -86,7 +86,6 @@ enum EngineTarXZ {
         }
 
         let root: EngineDirectory
-        let didExtractChunk: () throws -> Void
         private var state: State = .header
         private var headerBuffer = Data()
         private var nextPAXPath: String?
@@ -97,9 +96,8 @@ enum EngineTarXZ {
         private var directories: Set<String> = []
         private var totalExpandedBytes: Int64 = 0
 
-        init(root: EngineDirectory, didExtractChunk: @escaping () throws -> Void) {
+        init(root: EngineDirectory) {
             self.root = root
-            self.didExtractChunk = didExtractChunk
         }
 
         mutating func feed(_ bytes: UnsafeBufferPointer<UInt8>) throws {

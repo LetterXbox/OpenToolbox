@@ -62,26 +62,18 @@ final class OfflineHTMLPDFRenderer: NSObject, WKNavigationDelegate {
 
     func webView(
         _ webView: WKWebView,
-        decidePolicyFor navigationAction: WKNavigationAction,
-        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
-    ) {
-        guard let url = navigationAction.request.url else {
-            decisionHandler(.cancel)
-            return
-        }
+        decidePolicyFor navigationAction: WKNavigationAction
+    ) async -> WKNavigationActionPolicy {
+        guard let url = navigationAction.request.url else { return .cancel }
         let scheme = url.scheme?.lowercased() ?? ""
-        if scheme == "about" || scheme == "data" {
-            decisionHandler(.allow)
-            return
-        }
+        if scheme == "about" || scheme == "data" { return .allow }
         if scheme == "file", let allowedRootPath {
             let path = url.standardizedFileURL.path
             if path == allowedRootPath || path.hasPrefix(allowedRootPath + "/") {
-                decisionHandler(.allow)
-                return
+                return .allow
             }
         }
-        decisionHandler(.cancel)
+        return .cancel
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

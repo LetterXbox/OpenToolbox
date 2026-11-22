@@ -49,6 +49,8 @@ swift run OpenToolbox       # launch the app from the command line
 
 You can also open `Package.swift` in Xcode and run the `OpenToolbox` scheme.
 
+To build a universal, ad-hoc signed `OpenToolbox.app` and a release zip, run `scripts/package-app.sh <version>` on a Mac. The output goes to `.build/release-app/dist/`.
+
 ### Layout
 
 | Path | Contents |

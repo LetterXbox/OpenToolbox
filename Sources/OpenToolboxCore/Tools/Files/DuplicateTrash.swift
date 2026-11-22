@@ -111,8 +111,12 @@ extension DuplicateScanner {
         let recycled = FileToolDisk.canonicalParent(of: receipt)
         let recycledParentURL = recycled.deletingLastPathComponent()
         let recycledName = recycled.lastPathComponent
-        guard recycled.path != source.path,
-              let recycledParent = try? FileToolDisk.openDirectory(recycledParentURL) else { return unverified }
+        guard recycled.path != source.path else { return unverified }
+        guard let recycledParent = try? FileToolDisk.openDirectory(recycledParentURL) else {
+            // macOS privacy protection denies reading ~/.Trash without Full Disk Access.
+            return movedUnchanged(fd, from: source, in: parent, to: recycled, matching: candidate.snapshot)
+                ? .trashed(recycled) : unverified
+        }
         defer { close(recycledParent) }
         guard let recycledInfo = FileToolDisk.entry(recycledName, in: recycledParent) else { return unverified }
         let recycledIdentity = FileIdentity(recycledInfo)
@@ -150,6 +154,15 @@ extension DuplicateScanner {
         } catch {
             return .uncertain(reason: coreLocalized("Could not verify recovery from “\(recycled.path)”. Check the original folder and Trash, then scan again."))
         }
+    }
+
+    private static func movedUnchanged(
+        _ fd: Int32, from source: URL, in parent: Int32, to recycled: URL, matching snapshot: FileSnapshot
+    ) -> Bool {
+        guard FileToolDisk.snapshot(of: fd)?.matchesAfterRename(snapshot) == true,
+              let actual = FileToolDisk.pathOfSingleLink(at: fd),
+              FileToolDisk.canonicalParent(of: actual).path == recycled.path else { return false }
+        return FileToolDisk.entry(source.lastPathComponent, in: parent).map(FileIdentity.init) != snapshot.identity
     }
 
     private static func restore(

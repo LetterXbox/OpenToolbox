@@ -390,6 +390,44 @@ struct DuplicateScannerTests {
     }
 
     @Test(arguments: [false, true])
+    func trashVerifiesTheMoveThroughTheOpenFileWhenTheTrashIsUnreadable(changedInTrash: Bool) async throws {
+        try await withTemporaryDirectory { directory in
+            let source = try fixture("candidate", in: directory, contents: "same")
+            _ = try fixture("survivor", in: directory, contents: "same")
+            let trash = directory.appending(path: ".trash", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: false)
+            defer { chmod(trash.path, 0o755) }
+            let receipt = trash.appending(path: "candidate", directoryHint: .notDirectory)
+            let groups = try await DuplicateScanner.scan(folders: [directory])
+            let candidate = try #require(groups.first?.files.first)
+            let result = DuplicateScanner.trashSelected(
+                [candidate.url], in: groups, trashDirectory: { _ in trash }
+            ) { original in
+                try FileManager.default.moveItem(at: original, to: receipt)
+                if changedInTrash {
+                    try Data("changed".utf8).write(to: receipt)
+                }
+                try #require(chmod(trash.path, 0) == 0)
+                return receipt
+            }
+            let outcome = try #require(result.outcomes.first)
+            if changedInTrash {
+                guard case .uncertain = outcome.disposition else {
+                    Issue.record("Expected an uncertain move")
+                    return
+                }
+            } else {
+                #expect(outcome.disposition == .trashed(receipt))
+            }
+            #expect(result.removedFromResults == [candidate.url])
+            #expect(!FileManager.default.fileExists(atPath: source.path))
+            try #require(chmod(trash.path, 0o755) == 0)
+            let recycledContents = try String(contentsOf: receipt, encoding: .utf8)
+            #expect(recycledContents == (changedInTrash ? "changed" : "same"))
+        }
+    }
+
+    @Test(arguments: [false, true])
     func trashRestoresAReplacementMovedDuringTheCall(originalNameTaken: Bool) async throws {
         try await withTemporaryDirectory { directory in
             let source = try fixture("candidate.txt", in: directory, contents: "same")

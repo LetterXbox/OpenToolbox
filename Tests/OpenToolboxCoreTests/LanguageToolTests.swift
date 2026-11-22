@@ -2,6 +2,7 @@ import AVFoundation
 import AppKit
 import Foundation
 import PDFKit
+import Speech
 import Testing
 
 @testable import OpenToolboxCore
@@ -89,6 +90,29 @@ struct TranscriptTests {
         #expect(lines.map(\.text) == ["One two three.", "Four five six", "seven"])
         #expect(lines[0].start == 0)
         #expect(lines[0].end == 2.9)
+    }
+}
+
+@Suite("Speech recognition authorization")
+struct TranscriberAuthorizationTests {
+    @MainActor @Test func answerOnABackgroundThreadIsAccepted() async {
+        let granted = await Transcriber.authorization(status: .notDetermined) { handler in
+            DispatchQueue.global().async { handler(.authorized) }
+        }
+        #expect(granted)
+        let refused = await Transcriber.authorization(status: .notDetermined) { handler in
+            DispatchQueue.global().async { handler(.denied) }
+        }
+        #expect(!refused)
+    }
+
+    @Test func decidedStatusesDontAskAgain() async {
+        let neverAsk: (@escaping @Sendable (SFSpeechRecognizerAuthorizationStatus) -> Void) -> Void = { _ in
+            Issue.record("asked again")
+        }
+        #expect(await Transcriber.authorization(status: .authorized, request: neverAsk))
+        #expect(!(await Transcriber.authorization(status: .denied, request: neverAsk)))
+        #expect(!(await Transcriber.authorization(status: .restricted, request: neverAsk)))
     }
 }
 

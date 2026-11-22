@@ -115,13 +115,18 @@ public enum Transcriber {
         return locales.sorted { $0.identifier < $1.identifier }
     }
 
-    @MainActor
     public static func requestAuthorization() async -> Bool {
-        let status = SFSpeechRecognizer.authorizationStatus()
+        await authorization(status: SFSpeechRecognizer.authorizationStatus(), request: SFSpeechRecognizer.requestAuthorization)
+    }
+
+    static func authorization(
+        status: SFSpeechRecognizerAuthorizationStatus,
+        request: (@escaping @Sendable (SFSpeechRecognizerAuthorizationStatus) -> Void) -> Void
+    ) async -> Bool {
         if status == .authorized { return true }
         guard status == .notDetermined else { return false }
         return await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0 == .authorized) }
+            request { continuation.resume(returning: $0 == .authorized) }
         }
     }
 

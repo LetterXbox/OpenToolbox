@@ -13,9 +13,102 @@ struct UpdateTests {
         #expect(AppVersion("0.1") == AppVersion("0.1.0"))
         #expect(Set([AppVersion("1.0")!, AppVersion("1.0.0")!]).count == 1)
         #expect(AppVersion(" 1.2 ") == AppVersion("1.2"))
-        for bad in ["", "v", "1..2", "1.2-beta", "1.2.3.4.5", "a.b", "１.2", "+1.2"] {
+        for bad in ["", "v", "1..2", "1.2.3.4.5", "a.b", "１.2", "+1.2"] {
             #expect(AppVersion(bad) == nil, "\(bad)")
         }
+    }
+
+    @Test func testBuildVersionsSortBeforeTheirRelease() throws {
+        let rc1 = try #require(AppVersion("v0.3.0-rc.1"))
+        #expect(rc1.description == "0.3.0-rc.1")
+        #expect(rc1.isPrerelease)
+        #expect(rc1.prerelease == ["rc", "1"])
+        #expect(!AppVersion("0.3.0")!.isPrerelease)
+        let ordered = [
+            "0.2.0", "0.3.0-alpha.1", "0.3.0-beta.1", "0.3.0-beta.2", "0.3.0-beta.10", "0.3.0-rc.1", "0.3.0",
+            "0.3.1-beta.1", "0.3.1",
+        ].map { AppVersion($0)! }
+        for (lower, higher) in zip(ordered, ordered.dropFirst()) {
+            #expect(lower < higher, "\(lower) < \(higher)")
+            #expect(!(higher < lower), "\(higher) < \(lower)")
+        }
+        #expect(AppVersion("0.3-rc.1") == rc1)
+        #expect(Set([AppVersion("0.3-rc.1")!, rc1]).count == 1)
+        #expect(AppVersion("0.3.0-rc.1") != AppVersion("0.3.0"))
+        #expect(AppVersion("1.0.0-beta")! < AppVersion("1.0.0-beta.1")!)
+        #expect(AppVersion("1.0.0-1")! < AppVersion("1.0.0-alpha")!)
+        for bad in ["0.3.0-", "0.3.0-rc..1", "0.3.0-rc.01", "0.3.0-rc_1", "0.3.0+build.1", "0.3.0-rc.1234567890", "-rc.1"] {
+            #expect(AppVersion(bad) == nil, "\(bad)")
+        }
+    }
+
+    @Test func stableChecksIgnoreTestBuilds() throws {
+        let current = AppVersion("0.2.0")!
+        #expect(try UpdateFeed.evaluate(Self.release(tag: "v0.3.0-rc.1", prerelease: true), current: current)
+            == .upToDate(latest: AppVersion("0.3.0-rc.1")!))
+        #expect(throws: UpdateError.invalidResponse) {
+            try UpdateFeed.evaluate(Self.release(tag: "v0.3.0-rc.1"), current: current)
+        }
+        let testBuild = AppVersion("0.3.0-rc.2")!
+        guard case .available(let update) = try UpdateFeed.evaluate(Self.release(tag: "v0.3.0"), current: testBuild)
+        else { Issue.record("a test build should be offered its release"); return }
+        #expect(update.version == AppVersion("0.3.0"))
+    }
+
+    @Test func testBuildChecksOfferTheHighestVersion() throws {
+        let current = AppVersion("0.2.0")!
+        let list = Self.releases([("v0.2.0", false), ("v0.3.0-rc.2", true), ("v0.3.0-rc.10", true), ("v0.3.0-beta.4", true)])
+        guard case .available(let update) = try UpdateFeed.evaluateIncludingTestBuilds(list, current: current) else {
+            Issue.record("expected a test build"); return
+        }
+        #expect(update.version == AppVersion("0.3.0-rc.10"))
+        #expect(update.diskImageName == "OpenToolbox-0.3.0-rc.10-macOS-universal.dmg")
+        #expect(update.diskImageURL.path
+            == "/LetterXbox/OpenToolbox/releases/download/v0.3.0-rc.10/OpenToolbox-0.3.0-rc.10-macOS-universal.dmg")
+
+        let released = Self.releases([("v0.3.0-rc.2", true), ("v0.3.0", false)])
+        guard case .available(let stable) = try UpdateFeed.evaluateIncludingTestBuilds(
+            released, current: AppVersion("0.3.0-rc.2")!)
+        else { Issue.record("expected the full release"); return }
+        #expect(stable.version == AppVersion("0.3.0"))
+        #expect(try UpdateFeed.evaluateIncludingTestBuilds(released, current: AppVersion("0.3.0")!)
+            == .upToDate(latest: AppVersion("0.3.0")!))
+    }
+
+    @Test func testBuildChecksSkipMismatchedAndUnreadableReleases() throws {
+        let current = AppVersion("0.2.0")!
+        let list = Self.releases([
+            ("v0.9.0", true), ("v0.8.0-rc.1", false), ("nightly", true), ("v0.3.0-beta.1", true), ("v0.2.0", false),
+        ])
+        guard case .available(let update) = try UpdateFeed.evaluateIncludingTestBuilds(list, current: current) else {
+            Issue.record("expected a test build"); return
+        }
+        #expect(update.version == AppVersion("0.3.0-beta.1"))
+        #expect(throws: UpdateError.invalidResponse) {
+            try UpdateFeed.evaluateIncludingTestBuilds(Self.releases([("v0.9.0", true)]), current: current)
+        }
+        #expect(throws: UpdateError.noPublishedRelease) {
+            try UpdateFeed.evaluateIncludingTestBuilds(Data("[]".utf8), current: current)
+        }
+        #expect(throws: UpdateError.invalidResponse) {
+            try UpdateFeed.evaluateIncludingTestBuilds(Self.release(tag: "v0.3.0"), current: current)
+        }
+        #expect(throws: UpdateError.missingChecksum("OpenToolbox-0.3.0-rc.1-macOS-universal.dmg")) {
+            try UpdateFeed.evaluateIncludingTestBuilds(
+                Self.releases([("v0.3.0-rc.1", true)], digest: nil), current: current)
+        }
+    }
+
+    @Test func testBuildChecksAskForTheReleaseList() async throws {
+        let current = AppVersion("0.2.0")!
+        let client = StubHTTPClient(status: 200, body: Self.releases([("v0.3.0-rc.1", true)]))
+        guard case .available(let update) = try await UpdateChecker(client: client)
+            .check(current: current, includingTestBuilds: true)
+        else { Issue.record("expected a test build"); return }
+        #expect(update.version == AppVersion("0.3.0-rc.1"))
+        #expect(client.requests == [UpdateFeed.recentReleasesURL])
+        #expect(UpdateFeed.recentReleasesURL.absoluteString
+            == "https://api.github.com/repos/LetterXbox/OpenToolbox/releases?per_page=30")
     }
 
     @Test func newerReleaseWithDigestIsAvailable() throws {
@@ -410,6 +503,15 @@ struct UpdateTests {
             info = try await runner.run("/usr/bin/hdiutil", arguments: ["info"])
             #expect(!String(decoding: info, as: UTF8.self).contains(live.lastPathComponent))
         }
+    }
+
+    static func releases(
+        _ list: [(tag: String, prerelease: Bool)], digest: String? = "sha256:" + String(repeating: "AB", count: 32)
+    ) -> Data {
+        let objects = list.map {
+            try! JSONSerialization.jsonObject(with: release(tag: $0.tag, prerelease: $0.prerelease, digest: digest))
+        }
+        return try! JSONSerialization.data(withJSONObject: objects)
     }
 
     static func release(

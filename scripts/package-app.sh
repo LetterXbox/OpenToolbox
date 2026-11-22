@@ -7,6 +7,10 @@ set -euo pipefail
 
 VERSION="${1:?usage: scripts/package-app.sh <version> [build-number]}"
 BUILD_NUMBER="${2:-1}"
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[1-9][0-9]{0,3})?$ ]]; then
+    echo "error: version must look like 0.4.0, or 0.4.0-beta.1 for a test build (alpha, beta or rc)" >&2
+    exit 1
+fi
 BUNDLE_ID="io.github.letterxbox.OpenToolbox"
 MIN_MACOS="15.0"
 MIN_MACOS_PATTERN="${MIN_MACOS//./\\.}"

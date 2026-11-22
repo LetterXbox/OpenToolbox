@@ -110,6 +110,11 @@ private struct UpdateSettingsSection: View {
             Text(L("When on, OpenToolbox asks GitHub once a day for the latest release. Nothing about you or your files is sent. Downloaded updates are checked against their published SHA-256 checksum and code signature, and install when you restart or quit."))
                 .font(.callout)
                 .foregroundStyle(.secondary)
+            Toggle(L("Include test builds"), isOn: $updates.receivesTestBuilds)
+                .disabled(!updates.canCheck)
+            Text(L("Test builds are pre-releases for trying new features early, and may have more bugs. When the stable release they lead to comes out, OpenToolbox updates to it. Turning this off doesn't return you to an older stable version."))
+                .font(.callout)
+                .foregroundStyle(.secondary)
             if let reason = updates.unsupportedReason {
                 Text(reason)
                     .font(.callout)

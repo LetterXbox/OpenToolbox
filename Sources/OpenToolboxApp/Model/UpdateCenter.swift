@@ -49,6 +49,21 @@ final class UpdateCenter {
         }
     }
 
+    /// Whether checks also offer GitHub pre-releases. Until the user chooses, this is on only while the
+    /// running app is itself a test build, so a test build keeps receiving test builds and a stable one doesn't.
+    var receivesTestBuilds: Bool {
+        didSet {
+            guard receivesTestBuilds != oldValue else { return }
+            defaults.set(receivesTestBuilds, forKey: Self.testBuildsKey)
+            if receivesTestBuilds {
+                if case .upToDate = phase { phase = .idle }
+                if checksAutomatically { checkNow(userInitiated: false) }
+            } else {
+                dropTestBuild()
+            }
+        }
+    }
+
     let currentVersion: AppVersion?
     let unsupportedReason: String?
 
@@ -61,6 +76,7 @@ final class UpdateCenter {
 
     private static let checksKey = "UpdatesCheckAutomatically"
     private static let installsKey = "UpdatesInstallAutomatically"
+    private static let testBuildsKey = "UpdatesReceiveTestBuilds"
     private static let lastCheckedKey = "UpdatesLastChecked"
     private static let lastAutomaticAttemptKey = "UpdatesLastAutomaticAttempt"
     private static let installNoticeKey = "UpdatesInstallNotice"
@@ -73,6 +89,7 @@ final class UpdateCenter {
         unsupportedReason = UpdateInstaller.unsupportedReason(for: bundle.bundleURL, bundleIdentifier: bundle.bundleIdentifier)
         checksAutomatically = defaults.bool(forKey: Self.checksKey)
         installsAutomatically = defaults.bool(forKey: Self.installsKey)
+        receivesTestBuilds = defaults.object(forKey: Self.testBuildsKey) as? Bool ?? currentVersion?.isPrerelease ?? false
         lastChecked = defaults.object(forKey: Self.lastCheckedKey) as? Date
         lastAutomaticAttempt = defaults.object(forKey: Self.lastAutomaticAttemptKey) as? Date
         installer = (try? UpdateInstaller.defaultWorkRoot()).map { UpdateInstaller(workRoot: $0) }
@@ -123,14 +140,17 @@ final class UpdateCenter {
         }
         if !userInitiated { recordAutomaticAttempt() }
         phase = .checking
+        let includingTestBuilds = receivesTestBuilds
         task = Task {
             do {
                 let result = try await UpdateChecker(client: URLSessionUpdateClient(appVersion: currentVersion))
-                    .check(current: currentVersion)
+                    .check(current: currentVersion, includingTestBuilds: includingTestBuilds)
                 recordCheck()
                 switch result {
                 case .upToDate(let latest):
                     phase = .upToDate(max(latest, currentVersion))
+                case .available(let update) where !isWanted(update.version):
+                    phase = .idle
                 case .available(let update):
                     phase = .available(update)
                     if !userInitiated, installsAutomatically, canInstall {
@@ -174,7 +194,8 @@ final class UpdateCenter {
     /// Installs a prepared update without reopening, used when the app quits.
     func installOnQuit() {
         task?.cancel()
-        guard case .ready(let prepared) = phase, let installer, !isAutomaticTransaction || installsAutomatically
+        guard case .ready(let prepared) = phase, let installer, !isAutomaticTransaction || installsAutomatically,
+            isWanted(prepared.version)
         else { return }
         do {
             try installer.install(prepared)
@@ -194,6 +215,31 @@ final class UpdateCenter {
             Date().timeIntervalSince(last) < Self.interval
         { return }
         checkNow(userInitiated: false)
+    }
+
+    private func isWanted(_ version: AppVersion) -> Bool {
+        receivesTestBuilds || !version.isPrerelease
+    }
+
+    private func offer(_ update: AppUpdate) -> Phase {
+        isWanted(update.version) ? .available(update) : .idle
+    }
+
+    private func dropTestBuild() {
+        switch phase {
+        case .available(let update) where update.version.isPrerelease:
+            phase = .idle
+        case .downloading(let update, _) where update.version.isPrerelease:
+            task?.cancel()
+        case .ready(let prepared) where prepared.version.isPrerelease:
+            installer?.discard(prepared)
+            isAutomaticTransaction = false
+            phase = .idle
+        case .upToDate:
+            phase = .idle
+        default:
+            break
+        }
     }
 
     private func discardAutomaticUpdate() {
@@ -234,8 +280,8 @@ final class UpdateCenter {
         let launchRecord = launchRecord
         task = Task {
             guard let installed = await launchRecord?.value ?? nil else {
-                phase = automatic
-                    ? .available(update)
+                phase = automatic || !isWanted(update.version)
+                    ? offer(update)
                     : .failed(L("OpenToolbox couldn't read its own app bundle when it opened. Quit and reopen OpenToolbox, then try again."))
                 return
             }
@@ -243,16 +289,16 @@ final class UpdateCenter {
                 let prepared = try await installer.prepare(update, replacing: installed) { fraction in
                     Task { @MainActor in self.showProgress(fraction, for: update) }
                 }
-                guard !Task.isCancelled else {
+                guard !Task.isCancelled, isWanted(update.version) else {
                     installer.discard(prepared)
-                    phase = .available(update)
+                    phase = offer(update)
                     return
                 }
                 phase = .ready(prepared)
                 if automatic { windowRequest += 1 }
             } catch {
-                if Task.isCancelled || automatic {
-                    phase = .available(update)
+                if Task.isCancelled || automatic || !isWanted(update.version) {
+                    phase = offer(update)
                 } else {
                     phase = .failed(error.localizedDescription)
                 }

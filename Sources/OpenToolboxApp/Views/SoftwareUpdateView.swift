@@ -40,12 +40,18 @@ struct SoftwareUpdateView: View {
             ProgressView().controlSize(.small)
         case .upToDate(let latest):
             Text(L("OpenToolbox is up to date.")).font(.headline)
-            Text(L("Version \(latest.description) is the latest release."))
+            Text(latest.isPrerelease
+                ? L("Version \(latest.description) is the latest test build.")
+                : L("Version \(latest.description) is the latest release."))
                 .foregroundStyle(.secondary)
             buttons { Button(L("OK")) { dismissWindow(id: SoftwareUpdateWindow.id) }.keyboardShortcut(.defaultAction) }
         case .available(let update):
             Text(L("OpenToolbox \(update.version.description) is available.")).font(.headline)
             currentVersionText
+            if update.version.isPrerelease {
+                Text(L("This is a test build. It may have more bugs than a stable release."))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
             if let reason = updates.unsupportedReason {
                 Text(reason).font(.callout).foregroundStyle(.secondary)
             }

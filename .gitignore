@@ -1,0 +1,24 @@
+# Swift Package Manager / Xcode
+.build/
+.swiftpm/xcode/xcuserdata/
+xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+build/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+
+# macOS
+.DS_Store
+*.dSYM.zip
+*.dSYM
+
+# Local build/test outputs & scratch
+outputs/
+*.dmg
+*.pkg
+*.app/
+
+# Environment / local secrets
+.env
+.env.*

@@ -65,34 +65,34 @@ struct CropPDFTests {
 @Suite("Color formats")
 struct ColorFormatTests {
     @Test func parsesHex() throws {
-        let color = try #require(RGBColor(hex: "#3478F6"))
+        let color = try #require(SRGBColor(hex: "#3478F6"))
         #expect(color.hex == "#3478F6")
         #expect(color.rgb == "rgb(52, 120, 246)")
-        #expect(RGBColor(hex: "fff")?.hex == "#FFFFFF")
-        #expect(RGBColor(hex: "#11223380")?.hex == "#11223380")
-        #expect(RGBColor(hex: "#12345") == nil)
-        #expect(RGBColor(hex: "#GGGGGG") == nil)
-        #expect(RGBColor(hex: "") == nil)
+        #expect(SRGBColor(hex: "fff")?.hex == "#FFFFFF")
+        #expect(SRGBColor(hex: "#11223380")?.hex == "#11223380")
+        #expect(SRGBColor(hex: "#12345") == nil)
+        #expect(SRGBColor(hex: "#GGGGGG") == nil)
+        #expect(SRGBColor(hex: "") == nil)
     }
 
     @Test func hslAndHSB() {
-        let red = RGBColor(red: 1, green: 0, blue: 0)
+        let red = SRGBColor(red: 1, green: 0, blue: 0)
         #expect(red.hsl == "hsl(0, 100%, 50%)")
         #expect(red.hsb == "0°, 100%, 100%")
-        let gray = RGBColor(red: 0.5, green: 0.5, blue: 0.5)
+        let gray = SRGBColor(red: 0.5, green: 0.5, blue: 0.5)
         #expect(gray.hsl == "hsl(0, 0%, 50%)")
-        let teal = RGBColor(red: 0, green: 0.5, blue: 0.5)
+        let teal = SRGBColor(red: 0, green: 0.5, blue: 0.5)
         #expect(teal.hsl == "hsl(180, 100%, 25%)")
-        #expect(RGBColor(red: 0, green: 0, blue: 1).hsl == "hsl(240, 100%, 50%)")
-        #expect(RGBColor(red: 1, green: 0, blue: 1).hsb == "300°, 100%, 100%")
+        #expect(SRGBColor(red: 0, green: 0, blue: 1).hsl == "hsl(240, 100%, 50%)")
+        #expect(SRGBColor(red: 1, green: 0, blue: 1).hsb == "300°, 100%, 100%")
     }
 
     @Test func codeSnippetsAndAlpha() {
-        let color = RGBColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 0.5)
+        let color = SRGBColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 0.5)
         #expect(color.swiftUI == "Color(red: 0.2, green: 0.4, blue: 0.6, opacity: 0.5)")
         #expect(color.appKit == "NSColor(srgbRed: 0.2, green: 0.4, blue: 0.6, alpha: 0.5)")
         #expect(color.rgb == "rgb(51, 102, 153 / 0.5)")
-        #expect(RGBColor(red: 2, green: -1, blue: .nan).hex == "#FF0000")
+        #expect(SRGBColor(red: 2, green: -1, blue: .nan).hex == "#FF0000")
     }
 }
 

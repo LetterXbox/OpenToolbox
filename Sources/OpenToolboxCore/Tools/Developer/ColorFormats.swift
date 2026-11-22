@@ -1,7 +1,7 @@
 import Foundation
 
 /// An sRGB color with components in 0...1.
-public struct RGBColor: Equatable, Hashable, Sendable {
+public struct SRGBColor: Equatable, Hashable, Sendable {
     public var red: Double
     public var green: Double
     public var blue: Double

@@ -7,9 +7,9 @@ import SwiftUI
 
 struct ColorPickerView: View {
     let tool: ToolDescriptor
-    @State private var color = RGBColor(red: 0.2, green: 0.47, blue: 0.95)
+    @State private var color = SRGBColor(red: 0.2, green: 0.47, blue: 0.95)
     @State private var hexInput = ""
-    @State private var history: [RGBColor] = []
+    @State private var history: [SRGBColor] = []
     @State private var sampler: NSColorSampler?
 
     var body: some View {
@@ -81,7 +81,7 @@ struct ColorPickerView: View {
         self.sampler = sampler
         sampler.show { picked in
             let rgb = picked?.usingColorSpace(.sRGB).map {
-                RGBColor(red: $0.redComponent, green: $0.greenComponent, blue: $0.blueComponent, alpha: $0.alphaComponent)
+                SRGBColor(red: $0.redComponent, green: $0.greenComponent, blue: $0.blueComponent, alpha: $0.alphaComponent)
             }
             Task { @MainActor in
                 self.sampler = nil
@@ -91,10 +91,10 @@ struct ColorPickerView: View {
     }
 
     private func applyHex() {
-        if let parsed = RGBColor(hex: hexInput) { use(parsed) }
+        if let parsed = SRGBColor(hex: hexInput) { use(parsed) }
     }
 
-    private func use(_ new: RGBColor) {
+    private func use(_ new: SRGBColor) {
         color = new
         history.removeAll { $0 == new }
         history.insert(new, at: 0)

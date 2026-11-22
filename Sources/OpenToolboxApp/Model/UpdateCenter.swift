@@ -23,7 +23,7 @@ final class UpdateCenter {
     var checksAutomatically: Bool {
         didSet {
             defaults.set(checksAutomatically, forKey: Self.checksKey)
-            if !checksAutomatically { installsAutomatically = false }
+            if checksAutomatically { checkIfDue() } else { installsAutomatically = false }
         }
     }
 

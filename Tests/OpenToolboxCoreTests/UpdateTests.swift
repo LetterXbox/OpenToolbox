@@ -3,7 +3,7 @@ import Testing
 
 @testable import OpenToolboxCore
 
-@Suite("App updates")
+@Suite("App updates", .serialized)
 struct UpdateTests {
     @Test func versionsParseAndCompareNumerically() throws {
         let v011 = try #require(AppVersion("v0.1.1"))
@@ -272,6 +272,10 @@ struct UpdateTests {
             _ = try await runner.run("/usr/bin/hdiutil", arguments: [
                 "attach", "-nobrowse", "-readonly", "-noautoopen", "-mountroot", mountRoot.path, image.path,
             ])
+
+            let unmounted = interrupted.appending(path: "unmounted.dmg")
+            try FileManager.default.copyItem(at: image, to: unmounted)
+            _ = try await runner.run("/usr/bin/hdiutil", arguments: ["attach", "-nomount", unmounted.path])
 
             await UpdateInstaller(workRoot: work).removeStaleWork()
 

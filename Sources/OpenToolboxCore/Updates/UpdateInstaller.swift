@@ -96,16 +96,16 @@ public struct UpdateInstaller: Sendable {
 
         let mountRoot = work.appending(path: "mount", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: mountRoot, withIntermediateDirectories: true)
-        let mountPoint = try await attach(image, under: mountRoot)
+        let mount = try await attach(image, under: mountRoot)
         let staged: (app: URL, codeHash: Data)
         do {
             try Task.checkCancellation()
-            staged = try await stage(from: mountPoint, version: update.version, next: installedApp)
+            staged = try await stage(from: mount.point, version: update.version, next: installedApp)
         } catch {
-            await detach(mountPoint)
+            await detach(mount.device)
             throw error
         }
-        await detach(mountPoint)
+        await detach(mount.device)
 
         let prepared = PreparedUpdate(
             version: update.version, stagedApp: staged.app, installedApp: installedApp,
@@ -175,15 +175,20 @@ public struct UpdateInstaller: Sendable {
     /// Detaches disk images and removes downloads that an interrupted update left in the work folder.
     public func removeStaleWork() async {
         let root = workRoot.resolvingSymlinksInPath().path + "/"
+        let isInWork = { (path: String?) in
+            path.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path.hasPrefix(root) } ?? false
+        }
         if let output = try? await commands.run("/usr/bin/hdiutil", arguments: ["info", "-plist"]),
             let plist = try? PropertyListSerialization.propertyList(from: output, format: nil) as? [String: Any],
             let images = plist["images"] as? [[String: Any]]
         {
-            let mounts = images.flatMap { ($0["system-entities"] as? [[String: Any]]) ?? [] }
-                .compactMap { $0["mount-point"] as? String }
-                .map { URL(fileURLWithPath: $0, isDirectory: true) }
-            for mount in mounts where mount.resolvingSymlinksInPath().path.hasPrefix(root) {
-                await detach(mount)
+            for image in images {
+                let entities = (image["system-entities"] as? [[String: Any]]) ?? []
+                guard isInWork(image["image-path"] as? String)
+                    || entities.contains(where: { isInWork($0["mount-point"] as? String) }),
+                    let device = entities.first?["dev-entry"] as? String
+                else { continue }
+                await detach(device)
             }
         }
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: workRoot.path) else { return }
@@ -238,7 +243,7 @@ public struct UpdateInstaller: Sendable {
         return Self.codeHash(of: app) == prepared.codeHash
     }
 
-    private func attach(_ image: URL, under mountRoot: URL) async throws -> URL {
+    private func attach(_ image: URL, under mountRoot: URL) async throws -> (point: URL, device: String) {
         let commands = commands
         let output = try await Task.detached {
             try await commands.run("/usr/bin/hdiutil", arguments: [
@@ -247,23 +252,27 @@ public struct UpdateInstaller: Sendable {
         }.value
         guard let plist = try? PropertyListSerialization.propertyList(from: output, format: nil) as? [String: Any],
             let entities = plist["system-entities"] as? [[String: Any]],
-            let path = entities.compactMap({ $0["mount-point"] as? String }).first
+            let device = entities.first?["dev-entry"] as? String
         else { throw UpdateError.diskImageContents(coreLocalized("it could not be opened.")) }
+        guard let path = entities.compactMap({ $0["mount-point"] as? String }).first else {
+            await detach(device)
+            throw UpdateError.diskImageContents(coreLocalized("it could not be opened."))
+        }
         let mountPoint = URL(fileURLWithPath: path, isDirectory: true)
         guard mountPoint.deletingLastPathComponent().resolvingSymlinksInPath().path
             == mountRoot.resolvingSymlinksInPath().path
         else {
-            await detach(mountPoint)
+            await detach(device)
             throw UpdateError.diskImageContents(coreLocalized("it opened in an unexpected location."))
         }
-        return mountPoint
+        return (mountPoint, device)
     }
 
-    private func detach(_ mountPoint: URL) async {
+    private func detach(_ device: String) async {
         let commands = commands
         await Task.detached {
-            if (try? await commands.run("/usr/bin/hdiutil", arguments: ["detach", mountPoint.path])) == nil {
-                _ = try? await commands.run("/usr/bin/hdiutil", arguments: ["detach", "-force", mountPoint.path])
+            if (try? await commands.run("/usr/bin/hdiutil", arguments: ["detach", device])) == nil {
+                _ = try? await commands.run("/usr/bin/hdiutil", arguments: ["detach", "-force", device])
             }
         }.value
     }

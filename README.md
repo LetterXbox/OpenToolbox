@@ -103,6 +103,8 @@ If installing an update fails when you quit, OpenToolbox tells you why the next 
 - With two OpenToolbox windows open, `⌘K` shows Quick Open in both.
 - Releases are ad-hoc signed, so an update's code signature proves the app is intact but not who built it. Trust in an update rests on the GitHub release it comes from.
 - If you run two copies of OpenToolbox from the same folder at once, the one you open later removes an update the other has downloaded and is waiting to install. Choose **Check for Updates…** in the first copy to download it again.
+- When OpenToolbox opens, it records the app on disk that an update may later replace. If something replaces the app on disk at that exact moment, an update installed from that session replaces the new copy instead.
+- If macOS reports an update's disk image without its file path, OpenToolbox can't eject it, and the image stays mounted (hidden and read-only) until you restart.
 
 ## Building from Source
 

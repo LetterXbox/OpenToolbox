@@ -3,6 +3,8 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(UpdateCenter.self) private var updates
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         NavigationSplitView {
@@ -27,6 +29,9 @@ struct RootView: View {
             Button(L("OK")) { model.engines.errorMessage = nil }
         } message: { message in
             Text(message)
+        }
+        .onChange(of: updates.windowRequest) {
+            openWindow(id: SoftwareUpdateWindow.id)
         }
     }
 }

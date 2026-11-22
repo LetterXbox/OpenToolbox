@@ -294,23 +294,28 @@ struct ScanDocumentView: View {
 
     private func importPages(_ providers: [NSItemProvider]) {
         for provider in providers {
-            if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
-                _ = provider.loadDataRepresentation(for: .pdf) { data, _ in
-                    guard let data, let document = PDFDocument(data: data) else { return }
-                    let images = (0..<document.pageCount).compactMap { index in
-                        document.page(at: index).flatMap { try? PDFTools.render($0, dpi: 200) }
-                    }
-                    let boxes = images.map(ImageBox.init)
-                    Task { @MainActor in pages += boxes }
+            Self.loadPages(from: provider) { @MainActor boxes in pages += boxes }
+        }
+    }
+
+    private nonisolated static func loadPages(
+        from provider: NSItemProvider, deliver: @escaping @MainActor @Sendable ([ImageBox]) -> Void
+    ) {
+        let finish: @Sendable ([ImageBox]) -> Void = { boxes in Task { @MainActor in deliver(boxes) } }
+        if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
+            _ = provider.loadDataRepresentation(for: .pdf) { data, _ in
+                guard let data, let document = PDFDocument(data: data) else { return }
+                let images = (0..<document.pageCount).compactMap { index in
+                    document.page(at: index).flatMap { try? PDFTools.render($0, dpi: 200) }
                 }
-            } else {
-                _ = provider.loadDataRepresentation(for: .image) { data, _ in
-                    guard let data, let source = CGImageSourceCreateWithData(data as CFData, nil),
-                        let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
-                    else { return }
-                    let box = ImageBox(cgImage: image)
-                    Task { @MainActor in pages.append(box) }
-                }
+                finish(images.map(ImageBox.init))
+            }
+        } else {
+            _ = provider.loadDataRepresentation(for: .image) { data, _ in
+                guard let data, let source = CGImageSourceCreateWithData(data as CFData, nil),
+                    let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+                else { return }
+                finish([ImageBox(cgImage: image)])
             }
         }
     }

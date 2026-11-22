@@ -17,18 +17,18 @@
 
 ---
 
-OpenToolbox brings 51 everyday utilities together in a single Swift and SwiftUI app for macOS 15+. Everything built in runs locally on your Mac using Apple frameworks, and file tools always write to a dedicated output folder so your originals stay untouched.
+OpenToolbox brings 51 everyday utilities together in a single Swift and SwiftUI app for macOS 15+. Everything built in runs locally on your Mac using Apple frameworks, and tools that export processed files write to a dedicated output folder so your originals stay untouched (except when you explicitly act on existing files, such as choosing **Rename in place** in Batch Rename, moving selected copies to Trash in Find Duplicates, or clearing the quarantine flag in Quarantine Helper).
 
 ## Why OpenToolbox
 
 - **Pure native macOS (macOS 15+):** Built with Swift, SwiftUI, and Apple frameworks (Vision, PDFKit, ImageIO, AVFoundation, ScreenCaptureKit, Speech, Translation, and Foundation Models)—no Electron, no web wrappers, and universal binaries for Apple silicon and Intel.
-- **Private and offline by default:** No accounts, no telemetry, and no file uploads. All processing—including **Translate**, **Transcribe**, and **Summarize**—happens on your Mac. OpenToolbox connects to the network only when you explicitly start an online action: downloading on-demand engines, running **Network Speed Test**, checking for updates (plus an optional daily update check that is off by default), loading a URL in **Web Page to PDF**, showing or searching the map in **Coordinate Picker** (Apple Maps), or clicking **Find Network Scanners** in **Scan Document**. For **Translate** and (on macOS 26+) **Transcribe**, macOS may download an on-device language pack the first time you use a language.
-- **Originals stay untouched:** File tools write new, collision-safe files into `<output folder>/<yyyy-MM-dd>/<tool>/` rather than overwriting your source files.
+- **Private and offline by default:** No accounts, no telemetry, and no file uploads. All processing—including **Translate**, **Transcribe**, and **Summarize**—happens on your Mac. OpenToolbox connects to the network only when you explicitly start an online action: downloading on-demand engines, running **Network Speed Test**, checking for or downloading updates, loading a URL in **Web Page to PDF**, showing or searching the map in **Coordinate Picker** (Apple Maps), or clicking **Find Network Scanners** in **Scan Document**. You can also opt in to daily automatic update checks (off by default) and, on top of that, automatic download and installation of the update's disk image after a daily check without a further click (also off by default). For **Translate** and (on macOS 26+) **Transcribe**, macOS may download an on-device language pack the first time you use a language.
+- **Originals stay untouched:** Tools that export processed copies write new, collision-safe files into `<output folder>/<yyyy-MM-dd>/<tool>/` rather than overwriting your source files. Actions that modify or remove existing files happen only when you explicitly choose them—such as **Batch Rename**'s **Rename in place** mode (which supports undo), **Find Duplicates** moving selected copies to Trash, and **Quarantine Helper** clearing a file's quarantine flag in place.
 - **On-demand external engines:** Built-in tools work out of the box with zero extra downloads. External CLI engines are never bundled; when available, they download only on request, are verified by SHA-256, shared across tools, and removable in one click.
 
 ## Highlights
 
-- **Fast navigation:** Browse tools in the sidebar, jump anywhere with **Quick Open** in the window toolbar (or press `⌘K`), and enable or disable tools in the **Engine Manager**.
+- **Fast navigation:** Browse tools in the sidebar, jump anywhere with **Quick Open** in the window toolbar (or press `⌘K`), enable or disable tools in the **Tool Catalog**, and manage on-demand engines in the **Engine Manager**.
 - **Tools keep their state:** Switching to another tool preserves your inputs and lets running work continue. Active tools show a spinner in the sidebar; when background work finishes out of view, a dot marks the tool and macOS posts a notification.
 - **Independent windows:** Each OpenToolbox window maintains its own tool state, selection, and Quick Open palette.
 - **Menu bar, global hotkey & login:** In **Settings → General**, you can enable a menu bar icon (keeping OpenToolbox running when the last window closes), trigger Quick Open from any app with `⌃⌥K`, and launch OpenToolbox at login. All three are off by default.
@@ -110,12 +110,12 @@ Powered on-device by Apple's Vision, PDFKit, ImageIO, Image Capture, and WebKit 
 | --- | --- |
 | **Record Screen** | Record the whole screen, a window, or an app, with optional Mac audio and microphone capture. |
 | **Record Audio** | Record sound from a microphone to an AAC audio file. |
-| **Trim Audio** | Cut the start and end off an audio file (WAV, AIFF, and CAF stay lossless; other formats save as AAC). |
+| **Trim Audio** | Cut the start and end off an audio file (WAV, AIFF, and CAF keep their format and encoding; other formats save as AAC). |
 | **Extract Frames** | Save frames from videos as images: spread evenly, every few seconds, or at set times. |
 
-#### Coming Soon (On-Demand Engines)
+#### Planned (On-Demand Engines)
 
-- **Convert Video & Audio** (`ffmpeg`) and **Download Video** (`yt-dlp`) appear in the app as **"Coming soon"** until verified, SHA-256-pinned engine builds are ready.
+- **Tool Catalog** lists **Convert Video & Audio** (`ffmpeg`) and **Download Video** (`yt-dlp`) as **Planned**, and **Engine Manager** lists their engines as **Coming soon**; neither tool can be enabled in v0.3.0.
 
 ## Install
 
@@ -124,7 +124,7 @@ Requires **macOS 15 or later** (universal build for Apple silicon and Intel).
 Some tools have additional system or hardware requirements:
 
 - **Summarize** requires **macOS 26 or later** on a Mac with **Apple Intelligence** enabled.
-- **Transcribe** uses Apple's newer on-device speech engine on **macOS 26 or later**, and the older on-device speech recognizer on earlier versions (which supports fewer languages).
+- **Transcribe** uses Apple's newer on-device speech engine on **macOS 26 or later** and the older on-device speech recognizer on earlier versions; the languages offered depend on the recognizer your macOS version uses.
 - **Record Audio** requires a connected microphone.
 - **Scan Document** requires a scanner supported by macOS Image Capture or a nearby iPhone or iPad (Continuity Camera via **File → Import from iPhone or iPad**).
 
@@ -152,7 +152,7 @@ Choose **OpenToolbox → Check for Updates…** to check GitHub Releases manuall
 - **Not notarized / ad-hoc signed:** Releases require **Open Anyway** on first launch (see [Install](#install)). Because the signature is ad-hoc, it proves the app bundle is intact rather than publisher identity; trust in an update rests on the GitHub release. After an update, macOS may also ask again for **Screen Recording**, **Microphone**, **Speech Recognition**, and **Location** permissions.
 - **Unsaved recordings:** If **Record Screen** or **Record Audio** can't save a recording to the output folder, it is kept in **Unsaved Recordings** inside the recorder, where both tools can save or discard it later. If saving to **Unsaved Recordings** also fails, the error shows where the recording is stored; copy it from there before closing the tool.
 - **PDF Password restrictions and removal:** Printing, copying, and editing restrictions are enforced only by PDF apps that respect them. Removing a password or restrictions requires the PDF's owner password (or its single password if one was used for both).
-- **Summarize and Transcribe system limits:** **Summarize** requires macOS 26 or later on a Mac with Apple Intelligence turned on. On macOS versions earlier than 26, **Transcribe** uses the older on-device speech recognizer, which supports fewer languages.
+- **Summarize and Transcribe system limits:** **Summarize** requires macOS 26 or later on a Mac with Apple Intelligence turned on. **Transcribe** uses Apple's newer speech engine on macOS 26 or later and the older on-device speech recognizer on earlier versions; the languages it offers depend on the recognizer your macOS version uses.
 - **Scan Document sources:** Works with scanners macOS supports through Image Capture, and with an iPhone or iPad through **File → Import from iPhone or iPad**.
 - **Web Page to PDF rendering:** Pages load without your browser cookies or logins, so pages behind a sign-in save as their sign-in page. Splitting a page into A4 or US Letter pages can cut a line of text across two pages.
 - **Closing windows during active jobs:** Closing a window stops a Network Speed Test, Disk Speed Test, or duplicate scan running in that window. File batches already under way (such as image conversion or watermarking) finish as long as OpenToolbox remains running; with the menu bar icon off, closing the last window quits the app.
@@ -194,7 +194,7 @@ Build artifacts are written to `.build/release-app/dist/`.
 
 - **Localization:** User-facing strings go through `L("…")` (app) or `coreLocalized("…")` (core) into `Localizable.xcstrings` catalogs, with English as the source language.
 - **Engines:** Manifests live in `EngineCatalog` with per-architecture HTTPS URLs, byte sizes, and SHA-256 checksums. Downloads stage, verify size and digest, then atomically move into `~/Library/Application Support/OpenToolbox/engines/<id>/`. Unpinned engines stay marked **"Coming soon"** and cannot be installed.
-- **Outputs:** File tools write to `<output folder>/<yyyy-MM-dd>/<tool>/` with collision-safe filenames and never overwrite originals.
+- **Outputs:** Tools that export processed files write to `<output folder>/<yyyy-MM-dd>/<tool>/` with collision-safe filenames and never overwrite originals; tools that act directly on existing files when explicitly requested include **Batch Rename** (when **Rename in place** is chosen), **Find Duplicates** (moving selected copies to Trash), and **Quarantine Helper** (clearing the quarantine extended attribute in place).
 
 ## Contributing
 

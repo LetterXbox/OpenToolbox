@@ -80,6 +80,7 @@ struct DiskSpeedTestView: View {
         ToolPage(tool: tool) {
             Form {
                 Picker(L("Volume"), selection: $volume) {
+                    Text(L("Choose a volume")).tag(SpeedTestVolume?.none)
                     ForEach(volumes) { volume in
                         Text(label(for: volume)).tag(Optional(volume))
                     }
@@ -106,7 +107,7 @@ struct DiskSpeedTestView: View {
                 if session.isRunning {
                     Button(L("Cancel")) { session.cancel() }
                 }
-                Button(L("Refresh Volumes"), systemImage: "arrow.clockwise", action: refresh)
+                Button(L("Refresh Volumes"), systemImage: "arrow.clockwise") { refresh() }
                     .disabled(session.isRunning)
             }
 
@@ -130,7 +131,7 @@ struct DiskSpeedTestView: View {
                 }
             }
         }
-        .onAppear { if volumes.isEmpty { refresh() } }
+        .onAppear { if volumes.isEmpty { refresh(choosingDefault: true) } }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in
             if !session.isRunning { refresh() }
         }
@@ -141,11 +142,11 @@ struct DiskSpeedTestView: View {
         .reportsActivity(session.isRunning)
     }
 
-    private func refresh() {
+    private func refresh(choosingDefault: Bool = false) {
         volumes = SpeedTestVolume.mounted()
-        if let volume, let match = volumes.first(where: { $0.id == volume.id && $0.identity == volume.identity }) {
-            self.volume = match
-        } else {
+        if let volume {
+            self.volume = volumes.first { $0.id == volume.id && $0.identity == volume.identity }
+        } else if choosingDefault {
             volume = volumes.first
         }
     }

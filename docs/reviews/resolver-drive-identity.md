@@ -44,4 +44,6 @@ The issue is not critical, so it goes to the release reviewer to confirm the def
 
 ## Confirmation
 
-Pending.
+The release reviewer confirmed at `d2ced19`: "(a) yes, the specified clone case is noncritical; (b) yes, it may remain open through publication. Even if the clone passes all three identity checks, the benchmark exclusively creates a fresh file and unlinks it before writing." The clone case is deferred.
+
+The same round found a regression in the follow-up. When the chosen drive was ejected, reloading the list selected the first volume, which is the startup disk, so Start would have tested that disk instead. Now a reload never picks a volume on its own. If the chosen volume is gone or has a different identity, the selection is cleared to "Choose a volume" and Start stays disabled until a volume is chosen again. The first volume is chosen by default only when the tool first loads its list.

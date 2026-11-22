@@ -109,7 +109,7 @@ Powered on-device by Apple's Vision, PDFKit, ImageIO, Image Capture, and WebKit 
 | Tool | Description |
 | --- | --- |
 | **Record Screen** | Record the whole screen, a window, or an app, with optional Mac audio and microphone capture. |
-| **Record Audio** | Record sound from a microphone to an AAC audio file. |
+| **Record Audio** | Record sound from the microphone you choose to an AAC audio file. |
 | **Trim Audio** | Cut the start and end off an audio file (WAV, AIFF, and CAF keep their format and encoding; other formats save as AAC). |
 | **Extract Frames** | Save frames from videos as images: spread evenly, every few seconds, or at set times. |
 
@@ -125,7 +125,7 @@ Some tools have additional system or hardware requirements:
 
 - **Summarize** requires **macOS 26 or later** on a Mac with **Apple Intelligence** enabled.
 - **Transcribe** uses Apple's newer on-device speech engine on **macOS 26 or later** and the older on-device speech recognizer on earlier versions; the languages offered depend on the recognizer your macOS version uses.
-- **Record Audio** requires a connected microphone.
+- **Record Audio** requires a connected microphone; you can pick any connected microphone or use the system default, and it falls back to the system default if your saved microphone isn't connected.
 - **Scan Document** requires a scanner supported by macOS Image Capture or a nearby iPhone or iPad (Continuity Camera via **File → Import from iPhone or iPad**).
 
 1. Download the latest `OpenToolbox-<version>-macOS-universal.dmg` from [Releases](https://github.com/LetterXbox/OpenToolbox/releases) and open it.

@@ -49,7 +49,7 @@ struct AudioRecorderTests {
         try body(defaults)
     }
 
-    private func withDefaults(_ body: (UserDefaults) async throws -> Void) async throws {
+    private func withDefaults(_ body: @MainActor (UserDefaults) async throws -> Void) async throws {
         let name = "OpenToolboxAppTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }

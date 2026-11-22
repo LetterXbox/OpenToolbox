@@ -15,12 +15,6 @@ public struct SystemUpdateCommandRunner: UpdateCommandRunner {
     }
 }
 
-/// The device and inode of a file system item, used to tell whether a path still names the same item.
-public struct FileIdentity: Equatable, Sendable {
-    let device: Int64
-    let inode: UInt64
-}
-
 /// A verified update copied next to the installed app, waiting to be swapped in.
 public struct PreparedUpdate: Equatable, Sendable {
     public let version: AppVersion
@@ -217,7 +211,7 @@ public struct UpdateInstaller: Sendable {
     static func fileIdentity(at url: URL) -> FileIdentity? {
         var info = stat()
         guard lstat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else { return nil }
-        return FileIdentity(device: Int64(info.st_dev), inode: UInt64(info.st_ino))
+        return FileIdentity(info)
     }
 
     /// The code directory hash of `app` when its signature is valid for every architecture and nested item.

@@ -206,6 +206,28 @@ struct PDFToolTests {
         #expect(merged.page(at: 1)?.rotation == 0)  // original unchanged
     }
 
+    /// PDF rotation is clockwise; the red marker starts in the page's top-left corner.
+    @Test func renderHonorsPageRotation() throws {
+        let rotated = PDFTools.rotate([0], by: 90, in: try sampleDocument(pages: 1))
+        let page = try #require(rotated.page(at: 0))
+        let image = try PDFTools.render(page, dpi: 72)
+        #expect(image.width == 300 && image.height == 200)
+        let context = try #require(
+            CGContext(
+                data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let data = try #require(context.data).assumingMemoryBound(to: UInt8.self)
+        func rgb(_ x: Int, _ yFromTop: Int) -> (UInt8, UInt8) {
+            let offset = yFromTop * image.width * 4 + x * 4
+            return (data[offset], data[offset + 1])
+        }
+        let topRight = rgb(image.width - 10, 10)
+        let topLeft = rgb(10, 10)
+        #expect(topRight.0 > 200 && topRight.1 < 60, "expected red marker top-right, got \(topRight)")
+        #expect(topLeft.1 > 200, "expected white top-left, got \(topLeft)")
+    }
+
     @Test func renderAndWrite() async throws {
         try await withTemporaryDirectory { directory in
             let document = try sampleDocument(pages: 2)

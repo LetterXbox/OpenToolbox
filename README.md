@@ -16,7 +16,8 @@ An open-source, pure native macOS (Swift / SwiftUI) utility suite designed aroun
 - [x] Modular Tool & Engine Manager (enable/disable per tool, on-demand engine install/uninstall, disk usage, SHA-256 verification)
 - [x] Developer utilities (JSON, Base64/Hex, Hash, UUID, JWT, Timestamp, Diff, Regex, Clean Links, Unicode Inspector, Lorem Ipsum, Password Generator, CSV ↔ JSON)
 - [x] Text & File utilities (Word Counter, Case Converter, QR Code, Batch Rename, Find Duplicates)
-- [x] Built-in Image & PDF tools via Apple frameworks (Convert/Resize/Rotate, Strip EXIF, Remove Background, Blur Faces, Merge/Split/Organize PDF, Images ↔ PDF, OCR)
+- [x] Built-in Image & PDF tools via Apple frameworks (Convert/Resize/Rotate, Strip EXIF, Remove Background, Blur Faces, Merge/Split/Extract/Rotate PDF pages, Images ↔ PDF, OCR)
+- [ ] Visual PDF page organizer (drag to reorder, delete pages)
 - [x] Core Mac utilities (Keep Awake, Battery Health, Network Speed Test, Eject All Disks, Quarantine Helper, Hidden Settings)
 - [ ] Signed, notarized `.app` bundle and release build
 

@@ -209,6 +209,7 @@ struct NetworkSpeedTestView: View {
             }
         }
         .onDisappear { test?.cancel() }
+        .reportsActivity(test != nil)
     }
 
     private func start() {

@@ -567,6 +567,29 @@ struct DuplicateScannerTests {
     }
 }
 
+@Suite("Rename undo summary")
+struct RenameUndoSummaryTests {
+    @Test func countsOnlyRenamedFilesAndKeepsSameNamedFoldersApart() async throws {
+        try await withTemporaryDirectory { directory in
+            let one = directory.appending(path: "one/Photos", directoryHint: .isDirectory)
+            let two = directory.appending(path: "two/Photos", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: one, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: two, withIntermediateDirectories: true)
+            let sources = [
+                try fixture("a.txt", in: one, contents: "1"), try fixture("keep.txt", in: one, contents: "2"),
+                try fixture("a.txt", in: two, contents: "3"),
+            ]
+            let plan = try BatchRename.plan(sources: sources, rules: [.replace("a", with: "z")])
+            let result = BatchRename.renameInPlace(plan)
+            #expect(result.issues.isEmpty)
+            let journal = try #require(result.undoJournal)
+            #expect(journal.fileCount == 2)
+            #expect(journal.folders.map(\.standardizedFileURL.path) == [one.standardizedFileURL.path, two.standardizedFileURL.path])
+            #expect(BatchRename.undo(journal).undoJournal == nil)
+        }
+    }
+}
+
 private func fixture(_ name: String, in directory: URL, contents: String) throws -> URL {
     let url = directory.appending(path: name, directoryHint: .notDirectory)
     try Data(contents.utf8).write(to: url)

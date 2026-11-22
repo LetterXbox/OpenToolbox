@@ -17,6 +17,10 @@ OpenToolbox brings common small utilities together in a single Swift and SwiftUI
 
 Navigate tools from the sidebar, jump anywhere with **Quick Open (`⌘K`)**, and use the **Engine Manager** to enable or disable tools and manage on-demand engines.
 
+- **Tools keep their state.** Switching to another tool leaves the one you left as it was, and its work keeps running. A tool that is working shows a spinner in the sidebar. When it finishes out of sight, a dot marks it and macOS shows a notification.
+- **Each window is separate.** Every OpenToolbox window has its own tools, selection and Quick Open.
+- **Menu bar, hotkey and login.** **Settings → General** can show an OpenToolbox menu in the menu bar, open Quick Open from any app with `⌃⌥K`, and open OpenToolbox when you log in. All three are off by default. While the menu bar icon is shown, closing the last window keeps OpenToolbox running there.
+
 ### Developer
 
 | Tool | Description |
@@ -58,6 +62,7 @@ Powered by Apple frameworks (Vision, PDFKit, ImageIO):
 | **Extract Text (OCR)** | Recognize text in images and PDFs on-device. |
 | **Organize PDFs** | Merge, split, extract, reorder, and rotate PDF pages. |
 | **Images ↔ PDF** | Combine images into a PDF or export pages as images. |
+| **Watermark** | Add a text or image watermark to images and PDFs: position, size, opacity, diagonal or tiled. PDF pages stay vector and the text stays searchable. |
 
 ### Mac Utilities
 
@@ -66,6 +71,7 @@ Powered by Apple frameworks (Vision, PDFKit, ImageIO):
 | **Keep Awake** | Prevent your Mac from sleeping for a while. |
 | **Battery Health** | Show battery cycle count, capacity, and condition. |
 | **Network Speed Test** | Measure network quality with Apple's `networkQuality`. |
+| **Disk Speed Test** | Measure a drive's sequential write and read speed with an uncached test file that is removed when the test ends. |
 | **Eject All Disks** | Eject every external and disk-image volume. |
 | **Quarantine Helper** | Inspect and clear the quarantine flag on downloaded files. |
 | **Hidden Settings** | Toggle documented hidden macOS preferences. |
@@ -94,13 +100,15 @@ Choose **OpenToolbox → Check for Updates…** to look for a newer release on G
 
 An update is installed only after the disk image matches the SHA-256 checksum GitHub publishes for it, and the app inside has the OpenToolbox bundle identifier, the release's version number, and a valid code signature. It replaces the app when you restart or quit. Before downloading and again just before replacing the app, OpenToolbox checks that the app on disk is still the copy that was opened, and that the downloaded copy is still the one it verified, down to every architecture in its executable. If OpenToolbox can't write to its own folder, or macOS is running it from a temporary location, the update window links to the release page instead.
 
-If installing an update fails when you quit, OpenToolbox tells you why the next time you open it. Turning on the automatic check checks right away. Turning off automatic download and install stops an automatic download that is under way and discards an automatically downloaded update that hasn't been installed yet.
+If installing an update fails when you quit, OpenToolbox tells you why the next time you open it. While OpenToolbox runs in the menu bar, a downloaded update also appears in its menu as **Restart to Update**. Turning on the automatic check checks right away. Turning off automatic download and install stops an automatic download that is under way and discards an automatically downloaded update that hasn't been installed yet.
 
 ## Known Limitations
 
 - Releases are not notarized (see [Install](#install)).
-- Switching to another tool resets the one you left and stops a running Network Speed Test.
-- With two OpenToolbox windows open, `⌘K` shows Quick Open in both.
+- Closing a window stops a Network Speed Test, Disk Speed Test or duplicate scan running in it. File batches already under way, such as converting or watermarking, finish and save their files as long as OpenToolbox keeps running; with the menu bar icon off, closing the last window quits it.
+- Watermark works on single images and PDFs. Images with several frames or pages, such as animated GIFs and multipage TIFFs, are refused.
+- Watermarked PDFs keep each page's text and vector graphics, but links, form fields, comments and the outline are not kept as interactive items.
+- An update installs only when you restart or quit OpenToolbox, so while it stays open in the menu bar a downloaded update waits until you choose **Restart to Update** or quit.
 - Releases are ad-hoc signed, so an update's code signature proves the app is intact but not who built it. Trust in an update rests on the GitHub release it comes from.
 - If you run two copies of OpenToolbox from the same folder at once, the one you open later removes an update the other has downloaded and is waiting to install. Choose **Check for Updates…** in the first copy to download it again.
 - When OpenToolbox opens, it records the app on disk that an update may later replace. If something replaces the app on disk at that exact moment, an update installed from that session replaces the new copy instead.

@@ -71,6 +71,15 @@ public struct RenamePlanItem: Identifiable, Sendable {
 
 public struct RenameUndoJournal: Sendable {
     fileprivate let moves: [RenameMove]
+
+    /// How many files an undo puts back.
+    public var fileCount: Int { moves.count }
+
+    /// The folders holding those files, each listed once, in first-seen order.
+    public var folders: [URL] {
+        var seen = Set<String>()
+        return moves.map { $0.source.deletingLastPathComponent() }.filter { seen.insert($0.standardizedFileURL.path).inserted }
+    }
 }
 
 public struct RenameIssue: Sendable {

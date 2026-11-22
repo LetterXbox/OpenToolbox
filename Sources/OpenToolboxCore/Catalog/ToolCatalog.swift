@@ -141,6 +141,10 @@ public enum ToolCatalog {
             id: "pdf.images", category: .imagesAndPDF,
             title: "Images ↔ PDF", summary: "Combine images into a PDF or export pages as images.",
             symbolName: "doc.badge.plus", keywords: ["pdf", "images", "export", "combine"]),
+        ToolDescriptor(
+            id: "image.watermark", category: .imagesAndPDF,
+            title: "Watermark", summary: "Add a text or image watermark to images and PDFs.",
+            symbolName: "signature", keywords: ["watermark", "stamp", "logo", "copyright", "draft", "pdf"]),
     ]
 
     // MARK: - Mac Utilities
@@ -158,6 +162,10 @@ public enum ToolCatalog {
             id: "mac.network-speed", category: .macUtilities,
             title: "Network Speed Test", summary: "Measure network quality with Apple's networkQuality.",
             symbolName: "speedometer", keywords: ["speed", "network", "internet", "bandwidth"]),
+        ToolDescriptor(
+            id: "mac.disk-speed", category: .macUtilities,
+            title: "Disk Speed Test", summary: "Measure a drive's sequential write and read speed.",
+            symbolName: "internaldrive", keywords: ["disk", "drive", "ssd", "speed", "benchmark", "read", "write"]),
         ToolDescriptor(
             id: "mac.eject", category: .macUtilities,
             title: "Eject All Disks", summary: "Eject every external and disk-image volume.",

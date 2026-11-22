@@ -5,18 +5,29 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(UpdateCenter.self) private var updates
     @Environment(\.openWindow) private var openWindow
+    @State private var window = WindowModel()
 
     var body: some View {
         NavigationSplitView {
             SidebarView()
         } detail: {
-            DetailView(item: model.selection)
+            DetailView()
         }
         .frame(minWidth: 820, minHeight: 520)
         .overlay {
-            if model.isCommandPaletteVisible {
+            if window.isCommandPaletteVisible {
                 CommandPaletteView()
             }
+        }
+        .environment(window)
+        .focusedSceneValue(\.windowModel, window)
+        .background(
+            WindowReader { nsWindow in
+                window.window = nsWindow
+                if nsWindow?.isKeyWindow == true { model.windowBecameKey(window) }
+            })
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            if let key = note.object as? NSWindow, key === window.window { model.windowBecameKey(window) }
         }
         .alert(
             L("Engine error"),
@@ -31,20 +42,23 @@ struct RootView: View {
             Text(message)
         }
         .onChange(of: updates.windowRequest) {
-            openWindow(id: SoftwareUpdateWindow.id)
+            if updates.takeWindowRequest() { openWindow(id: SoftwareUpdateWindow.id) }
         }
         .onAppear {
-            if updates.takeLaunchNotice() { openWindow(id: SoftwareUpdateWindow.id) }
+            model.register(window) { [openWindow] in openWindow(id: MainWindow.id) }
+            let notice = updates.takeLaunchNotice()
+            if updates.takeWindowRequest() || notice { openWindow(id: SoftwareUpdateWindow.id) }
         }
+        .onDisappear { model.unregister(window) }
     }
 }
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
+    @Environment(WindowModel.self) private var window
 
     var body: some View {
-        @Bindable var model = model
-        List(selection: $model.selection) {
+        List(selection: Binding(get: { window.selection }, set: { window.select($0) })) {
             Section {
                 Label(L("Tool Catalog"), systemImage: "square.grid.2x2")
                     .tag(SidebarItem.catalog)
@@ -54,7 +68,7 @@ struct SidebarView: View {
             ForEach(model.sidebarSections) { section in
                 Section(section.category.localizedTitle) {
                     ForEach(section.tools) { tool in
-                        Label(tool.localizedTitle, systemImage: tool.symbolName)
+                        SidebarToolRow(tool: tool)
                             .tag(SidebarItem.tool(tool.id))
                     }
                 }
@@ -63,7 +77,7 @@ struct SidebarView: View {
         .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 320)
         .sidebarBottomBar {
             Button {
-                model.isCommandPaletteVisible = true
+                window.isCommandPaletteVisible = true
             } label: {
                 HStack {
                     Image(systemName: "magnifyingglass")
@@ -98,21 +112,60 @@ private extension View {
     }
 }
 
-struct DetailView: View {
-    @Environment(AppModel.self) private var model
-    let item: SidebarItem?
+struct SidebarToolRow: View {
+    @Environment(WindowModel.self) private var window
+    let tool: ToolDescriptor
 
     var body: some View {
-        switch item {
+        HStack {
+            Label(tool.localizedTitle, systemImage: tool.symbolName)
+            Spacer(minLength: 4)
+            if window.busyTools.contains(tool.id) {
+                ProgressView()
+                    .controlSize(.mini)
+                    .accessibilityLabel(L("Working"))
+            } else if window.finishedTools.contains(tool.id) {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: 7, height: 7)
+                    .accessibilityLabel(L("Finished"))
+            }
+        }
+    }
+}
+
+/// Shows the selected page. Tools opened in this window stay alive behind it, so switching
+/// back finds them as they were left, with any running work still going.
+struct DetailView: View {
+    @Environment(WindowModel.self) private var window
+
+    var body: some View {
+        ZStack {
+            ForEach(window.openedTools, id: \.self) { id in
+                if let tool = ToolCatalog.tool(id) {
+                    let isShown = window.selection == .tool(id)
+                    ToolHostView(tool: tool)
+                        .environment(\.toolActivity, ToolActivity(tool: tool, window: window))
+                        .opacity(isShown ? 1 : 0)
+                        .allowsHitTesting(isShown)
+                        .disabled(!isShown)
+                        .accessibilityHidden(!isShown)
+                        .zIndex(isShown ? 1 : 0)
+                }
+            }
+            page
+        }
+        .navigationTitle(title)
+    }
+
+    @ViewBuilder private var page: some View {
+        switch window.selection {
         case .catalog:
             ToolCatalogView()
         case .engines:
             EngineManagerView()
         case .tool(let id):
-            if let tool = ToolCatalog.tool(id) {
-                ToolHostView(tool: tool)
-                    .navigationTitle(tool.localizedTitle)
-            } else {
+            if ToolCatalog.tool(id) == nil {
                 ContentUnavailableView(L("Tool not found"), systemImage: "questionmark.square.dashed")
             }
         case nil:
@@ -123,11 +176,21 @@ struct DetailView: View {
             )
         }
     }
+
+    private var title: String {
+        switch window.selection {
+        case .catalog: L("Tool Catalog")
+        case .engines: L("Engines")
+        case .tool(let id): ToolCatalog.tool(id)?.localizedTitle ?? L("OpenToolbox")
+        case nil: L("OpenToolbox")
+        }
+    }
 }
 
 /// Shows a tool's view, or explains what it still needs.
 struct ToolHostView: View {
     @Environment(AppModel.self) private var model
+    @Environment(WindowModel.self) private var window
     let tool: ToolDescriptor
 
     var body: some View {
@@ -144,7 +207,7 @@ struct ToolHostView: View {
             } description: {
                 Text(L("This tool needs \(missing.map(\.displayName).formatted(.list(type: .and))), which is downloaded on demand."))
             } actions: {
-                Button(L("Open Engine Manager")) { model.selection = .engines }
+                Button(L("Open Engine Manager")) { window.open(.engines) }
             }
         } else {
             ToolViewRegistry.view(for: tool)
@@ -179,11 +242,13 @@ enum ToolViewRegistry {
         case "image.ocr": OCRView(tool: tool)
         case "pdf.organize": PDFOrganizeView(tool: tool)
         case "pdf.images": ImagesPDFView(tool: tool)
+        case "image.watermark": WatermarkView(tool: tool)
         case "files.batch-rename": BatchRenameView(tool: tool)
         case "files.duplicates": FindDuplicatesView(tool: tool)
         case "mac.keep-awake": KeepAwakeView(tool: tool)
         case "mac.battery": BatteryHealthView(tool: tool)
         case "mac.network-speed": NetworkSpeedTestView(tool: tool)
+        case "mac.disk-speed": DiskSpeedTestView(tool: tool)
         case "mac.eject": EjectDisksView(tool: tool)
         case "mac.quarantine": QuarantineHelperView(tool: tool)
         case "mac.hidden-settings": HiddenSettingsView(tool: tool)

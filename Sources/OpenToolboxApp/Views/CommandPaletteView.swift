@@ -2,9 +2,10 @@ import AppKit
 import OpenToolboxCore
 import SwiftUI
 
-/// ⌘K quick-open palette over tools and app destinations.
+/// ⌘K quick-open palette over tools and app destinations, shown in one window.
 struct CommandPaletteView: View {
     @Environment(AppModel.self) private var model
+    @Environment(WindowModel.self) private var window
     @State private var query = ""
     @State private var highlighted = 0
     @FocusState private var isSearchFocused: Bool
@@ -114,7 +115,7 @@ struct CommandPaletteView: View {
         .onChange(of: query) { highlighted = 0 }
         .task {
             // A text field in the tool view keeps first responder unless it resigns first.
-            NSApp.keyWindow?.makeFirstResponder(nil)
+            window.window?.makeFirstResponder(nil)
             await Task.yield()
             isSearchFocused = true
         }
@@ -141,10 +142,10 @@ struct CommandPaletteView: View {
 
     private func activate(_ entries: [Entry], at index: Int) {
         guard entries.indices.contains(index) else { return }
-        model.open(entries[index].destination)
+        window.open(entries[index].destination)
     }
 
     private func close() {
-        model.isCommandPaletteVisible = false
+        window.isCommandPaletteVisible = false
     }
 }

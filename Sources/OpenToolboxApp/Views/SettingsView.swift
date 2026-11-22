@@ -8,6 +8,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            GeneralSettingsSection(model: model, loginItem: model.loginItem)
             Section(L("Output")) {
                 LabeledContent(L("Save results to")) {
                     Text(model.outputBaseDirectory.path)
@@ -53,6 +54,47 @@ struct SettingsView: View {
         if panel.runModal() == .OK, let url = panel.url {
             model.setOutputBaseDirectory(url)
         }
+    }
+}
+
+private struct GeneralSettingsSection: View {
+    @Bindable var model: AppModel
+    let loginItem: LoginItem
+
+    var body: some View {
+        Section(L("General")) {
+            Toggle(L("Show OpenToolbox in the menu bar"), isOn: $model.showsMenuBarExtra)
+            Text(L("While the menu bar icon is shown, closing the last window keeps OpenToolbox running there."))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Toggle(L("Open Quick Open from any app with \(GlobalHotKey.quickOpenLabel)"), isOn: $model.usesQuickOpenHotKey)
+            if model.hotKeyUnavailable {
+                Text(L("\(GlobalHotKey.quickOpenLabel) is already used by another app."))
+                    .font(.callout)
+                    .foregroundStyle(.red)
+            }
+            Toggle(
+                L("Open OpenToolbox when you log in"),
+                isOn: Binding(get: { loginItem.isEnabled }, set: { loginItem.setEnabled($0) })
+            )
+            .disabled(!loginItem.isSupported)
+            if !loginItem.isSupported {
+                Text(L("Available when OpenToolbox runs from its app bundle."))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else if loginItem.needsApproval {
+                HStack {
+                    Text(L("Allow OpenToolbox in System Settings → General → Login Items."))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Button(L("Open Login Items")) { loginItem.openSystemSettings() }
+                }
+            }
+            if let error = loginItem.error {
+                Text(error).font(.callout).foregroundStyle(.red)
+            }
+        }
+        .onAppear { loginItem.refresh() }
     }
 }
 

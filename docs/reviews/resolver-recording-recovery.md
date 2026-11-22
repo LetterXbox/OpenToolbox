@@ -16,7 +16,7 @@ Three findings from the v0.3.0 release review failed two reviewed fix attempts. 
 
 **Astra (round 4): confirmed not critical, and it may stay open past the v0.3.0 gate.** The README's known limitations must tell users to copy the recording from the displayed path before closing the view.
 
-**Decision: deferred.** The later fix is to record straight into a durable recovery location so that no rescue move is needed.
+**Decision: deferred.**
 
 ## B. Microphone start after close (round-1 #6)
 
@@ -44,4 +44,4 @@ Three findings from the v0.3.0 release review failed two reviewed fix attempts. 
 
 **Astra (round 6): confirmed not critical, and the unlink gap may stay open past the v0.3.0 gate.** The read gap is closed by `e5c4c5d`, which checks the opened descriptor's type, device and inode before copying.
 
-**Decision:** the read gap is fixed. Deferred: move the entry into private same-volume staging, verify it there, and only then unlink it, for both Discard and cleanup after Save.
+**Decision:** the read gap is fixed, and the unlink gap is deferred.

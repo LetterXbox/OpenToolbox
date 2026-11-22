@@ -52,7 +52,6 @@ private struct UnsavedRecordingsView: View {
                     Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting(recordings.map(\.url)) }
                     Button(L("Discard…"), role: .destructive) { isConfirmingDiscard = true }
                 }
-                if let failure { ErrorMessage(text: failure) }
             }
             .confirmationDialog(L("Discard \(recordings.count) unsaved recordings?"), isPresented: $isConfirmingDiscard) {
                 Button(L("Discard"), role: .destructive, action: discardAll)
@@ -60,6 +59,7 @@ private struct UnsavedRecordingsView: View {
                 Text(L("They are deleted and can't be recovered."))
             }
         }
+        if let failure { ErrorMessage(text: failure) }
         Color.clear.frame(height: 0)
             .onAppear(perform: reload)
             .onReceive(NotificationCenter.default.publisher(for: RecordingStore.didChange)) { _ in reload() }
@@ -141,6 +141,7 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
 
     fileprivate static var active: Set<ScreenRecorder> = []
     @ObservationIgnored private var closeRequested = false
+    @ObservationIgnored private var session = 0
 
     @ObservationIgnored private var stream: SCStream?
     @ObservationIgnored private var recording: SCRecordingOutput?
@@ -179,11 +180,24 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
 
     func stop() {
         guard case .recording = phase, let stream else { return }
-        phase = .finishing
+        beginFinishing()
+        let session = self.session
         stream.stopCapture { [weak self] error in
+            guard error != nil else { return }
             Task { @MainActor in
-                if let error { self?.fail(error) }
+                guard let self, self.session == session else { return }
+                self.beginFinishing()
             }
+        }
+    }
+
+    private func beginFinishing() {
+        guard phase != .finishing else { return }
+        phase = .finishing
+        let session = self.session
+        Task {
+            try? await Task.sleep(for: .seconds(30))
+            if self.session == session, self.phase == .finishing { self.preserveUnfinished() }
         }
     }
 
@@ -212,14 +226,16 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
             let recording = SCRecordingOutput(configuration: recordingConfiguration, delegate: self)
             let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
             try stream.addRecordingOutput(recording)
+            session += 1
             self.stream = stream
             self.recording = recording
             temporary = url
             phase = .starting
             Self.active.insert(self)
+            let session = self.session
             stream.startCapture { [weak self] error in
                 Task { @MainActor in
-                    guard let self else { return }
+                    guard let self, self.session == session else { return }
                     if let error {
                         self.fail(error)
                     } else {
@@ -259,7 +275,19 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
         failure = result.failure ?? L("Recording stopped early: \(error.localizedDescription) What was recorded was saved.")
     }
 
+    private func preserveUnfinished() {
+        defer { reset() }
+        guard let temporary else { return }
+        let kept = RecordingStore.standard().keep(
+            temporary, named: recordingName("Screen Recording", extension: "mov"), tool: "media.record-screen")
+        failure =
+            kept == temporary
+            ? L("macOS hasn't finished saving the recording. It is at \(kept.path).")
+            : L("macOS hasn't finished saving the recording, so it was kept below as it is.")
+    }
+
     private func reset() {
+        session += 1
         stream = nil
         recording = nil
         temporary = nil
@@ -287,25 +315,26 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
 
     nonisolated func contentSharingPickerStartDidFailWithError(_ error: Error) {
         Task { @MainActor in
+            guard self.phase == .picking else { return }
             self.endPicking()
             self.fail(error)
         }
     }
 
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
-        Task { @MainActor in self.streamStopped(error) }
+        let source = ObjectIdentifier(stream)
+        Task { @MainActor in
+            guard let current = self.stream, ObjectIdentifier(current) == source else { return }
+            self.streamStopped(error)
+        }
     }
 
     private func streamStopped(_ error: Error) {
         switch phase {
         case .recording, .finishing:
-            phase = .finishing
             let stopped = (error as NSError).code == SCStreamError.Code.userStopped.rawValue
             if !stopped { failure = error.localizedDescription }
-            Task {
-                try? await Task.sleep(for: .seconds(5))
-                if self.phase == .finishing { self.fail(error) }
-            }
+            beginFinishing()
         case .starting:
             fail(error)
         case .idle, .picking:
@@ -313,29 +342,38 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
         }
     }
 
-    static func stopAll() async {
+    static func stopAll() async -> Bool {
         for recorder in active { recorder.close() }
         let deadline = Date().addingTimeInterval(10)
         while !active.isEmpty, Date() < deadline {
             try? await Task.sleep(for: .milliseconds(100))
         }
+        return active.isEmpty
     }
 
     nonisolated func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
-        Task { @MainActor in self.finish() }
+        let source = ObjectIdentifier(recordingOutput)
+        Task { @MainActor in
+            guard let current = self.recording, ObjectIdentifier(current) == source else { return }
+            self.finish()
+        }
     }
 
     nonisolated func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: Error) {
-        Task { @MainActor in self.fail(error) }
+        let source = ObjectIdentifier(recordingOutput)
+        Task { @MainActor in
+            guard let current = self.recording, ObjectIdentifier(current) == source else { return }
+            self.fail(error)
+        }
     }
 }
 
 enum RecordingSessions {
     @MainActor static var isRecording: Bool { !ScreenRecorder.active.isEmpty || !AudioRecorder.active.isEmpty }
 
-    @MainActor static func stopAll() async {
+    @MainActor static func stopAll() async -> Bool {
         AudioRecorder.stopAll()
-        await ScreenRecorder.stopAll()
+        return await ScreenRecorder.stopAll()
     }
 }
 
@@ -498,11 +536,13 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     }
 
     nonisolated func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
-        let message = error?.localizedDescription
+        let source = ObjectIdentifier(recorder)
+        let message = error?.localizedDescription ?? L("Recording stopped because of an error.")
         Task { @MainActor in
-            guard let destination = self.destination else { return }
+            guard let current = self.recorder, ObjectIdentifier(current) == source, let destination = self.destination
+            else { return }
             self.stop(output: destination.output, tool: destination.tool)
-            self.failure = message ?? L("Recording stopped because of an error.")
+            self.failure = [message, self.failure].compactMap { $0 }.joined(separator: " ")
         }
     }
 }

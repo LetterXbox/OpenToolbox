@@ -126,6 +126,7 @@ If installing an update fails when you quit, OpenToolbox tells you why the next 
 ## Known Limitations
 
 - Releases are not notarized (see [Install](#install)).
+- If Record Screen or Record Audio can't save a recording to the output folder, it is kept in **Unsaved Recordings**, where both tools can save it later. If even that fails, the error shows where the recording is; copy it from there before closing the tool.
 - Because releases are ad-hoc signed, macOS may ask again for Screen Recording, Microphone, Speech Recognition and Location permission after an update.
 - Summarize needs macOS 26 or later on a Mac with Apple Intelligence turned on. On older macOS, Transcribe uses the older on-device speech recognizer, which supports fewer languages.
 - Scan Document works with scanners macOS supports through Image Capture, and with an iPhone or iPad through **File → Import from iPhone or iPad**.

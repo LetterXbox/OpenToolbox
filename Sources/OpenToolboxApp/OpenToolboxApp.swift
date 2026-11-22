@@ -93,8 +93,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard RecordingSessions.isRecording else { return .terminateNow }
         Task {
-            await RecordingSessions.stopAll()
-            sender.reply(toApplicationShouldTerminate: true)
+            let finished = await RecordingSessions.stopAll()
+            sender.reply(toApplicationShouldTerminate: finished)
+            if !finished {
+                let alert = NSAlert()
+                alert.messageText = L("A screen recording is still being saved")
+                alert.informativeText = L("OpenToolbox didn't quit so the recording isn't lost. Try quitting again in a moment.")
+                alert.runModal()
+            }
         }
         return .terminateLater
     }

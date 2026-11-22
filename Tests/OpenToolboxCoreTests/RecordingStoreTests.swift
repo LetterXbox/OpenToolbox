@@ -76,22 +76,60 @@ struct RecordingStoreTests {
             try FileManager.default.createDirectory(at: planted, withIntermediateDirectories: true)
             try Data("keep me".utf8).write(to: planted.appending(path: "a.txt"))
             let outside = try makeRecording(in: directory)
-            try FileManager.default.createSymbolicLink(
-                at: folder.appending(path: "link.m4a"), withDestinationURL: outside)
+            try FileManager.default.createSymbolicLink(at: folder.appending(path: "link.m4a"), withDestinationURL: outside)
 
             #expect(store.recordings(of: [audio]).isEmpty)
-            #expect(throws: RecordingStore.StoreError.self) { try store.discard(.init(url: planted, tool: audio)) }
-            #expect(throws: RecordingStore.StoreError.self) { try store.discard(.init(url: outside, tool: audio)) }
-            #expect(throws: RecordingStore.StoreError.self) {
-                try store.discard(.init(url: folder.appending(path: "link.m4a"), tool: audio))
-            }
+            let fake = RecordingStore.Entry(name: "Photos", tool: audio, url: planted, device: 0, inode: 0)
+            #expect(throws: RecordingStore.StoreError.self) { try store.discard(fake) }
             #expect(FileManager.default.fileExists(atPath: planted.appending(path: "a.txt").path))
             #expect(FileManager.default.fileExists(atPath: outside.path))
 
             let kept = store.keep(outside, named: "Take.m4a", tool: audio)
-            #expect(store.recordings(of: [audio]).map(\.url.lastPathComponent) == ["Take.m4a"])
-            try store.discard(.init(url: kept, tool: audio))
+            #expect(kept != outside)
+            let entries = store.recordings(of: [audio])
+            #expect(entries.map(\.name) == ["Take.m4a"])
+            try store.discard(try #require(entries.first))
             #expect(store.recordings(of: [audio]).isEmpty)
+        }
+    }
+
+    @Test func aLinkedToolFolderIsNeverUsed() async throws {
+        try await withTemporaryDirectory { directory in
+            let store = RecordingStore(directory: directory.appending(path: "store"))
+            let elsewhere = directory.appending(path: "elsewhere", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+            let precious = elsewhere.appending(path: "precious.m4a")
+            try Data("mine".utf8).write(to: precious)
+            try FileManager.default.createDirectory(at: store.directory, withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(at: store.folder(for: audio), withDestinationURL: elsewhere)
+
+            #expect(store.recordings(of: [audio]).isEmpty)
+            let recording = try makeRecording(in: directory)
+            #expect(store.keep(recording, named: "Take.m4a", tool: audio) == recording)
+            #expect(try Data(contentsOf: precious) == Data("mine".utf8))
+            #expect(!FileManager.default.fileExists(atPath: elsewhere.appending(path: "Take.m4a").path))
+        }
+    }
+
+    @Test func aReplacedEntryIsLeftAlone() async throws {
+        try await withTemporaryDirectory { directory in
+            let store = RecordingStore(directory: directory.appending(path: "store"))
+            _ = store.keep(try makeRecording(in: directory), named: "Take.m4a", tool: audio)
+            let entry = try #require(store.recordings(of: [audio]).first)
+            try FileManager.default.removeItem(at: entry.url)
+            try FileManager.default.createDirectory(at: entry.url, withIntermediateDirectories: true)
+            try Data("inside".utf8).write(to: entry.url.appending(path: "note.txt"))
+
+            #expect(throws: RecordingStore.StoreError.notARecording("Take.m4a")) { try store.discard(entry) }
+            #expect(throws: RecordingStore.StoreError.notARecording("Take.m4a")) {
+                try store.save(entry, output: OutputDirectory(baseDirectory: directory.appending(path: "out")))
+            }
+            #expect(try Data(contentsOf: entry.url.appending(path: "note.txt")) == Data("inside".utf8))
+
+            try FileManager.default.removeItem(at: entry.url)
+            try Data("other".utf8).write(to: entry.url)
+            #expect(throws: RecordingStore.StoreError.notARecording("Take.m4a")) { try store.discard(entry) }
+            #expect(FileManager.default.fileExists(atPath: entry.url.path))
         }
     }
 }

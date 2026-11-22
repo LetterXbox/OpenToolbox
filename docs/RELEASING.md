@@ -19,11 +19,18 @@ Clean-room boundary (see "Contributing" in the README):
   - copying their icons, screenshots, UI text or feature descriptions.
 - Design and word our own versions of any feature from scratch.
 
-## 2. Review gate
+## 2. Update the main README
 
-Run the release review (GPT-6.2 Astra, high effort) on the release commit and resolve or explicitly defer every finding. Record deferrals in `docs/reviews/` and in the README's known-limitations list.
+Update `README.md` for every release because it holds the user-facing feature list, install instructions, and known limitations.
 
-## 3. Package
+- Have **Gemini 4 Neon** write or update `README.md` so the tool list, highlights, privacy/network uses, build requirements, and known limitations accurately match the release.
+- Keep existing project links (such as support/donation links, license, and credits) intact.
+
+## 3. Review gate
+
+Run the release review (GPT-6.2 Astra, high effort) on the release commit and resolve or explicitly defer every finding. Record deferrals in `docs/reviews/` and update the README's known-limitations list (via Gemini 4 Neon if the README changes).
+
+## 4. Package
 
 On a Mac with Xcode 26 or later, from a clean checkout of the release commit:
 
@@ -39,7 +46,7 @@ The script builds a universal, ad-hoc signed `OpenToolbox.app`. Its output is in
 
 `make-dmg.sh` checks that the app inside the disk image is identical to the built app and validly signed. Before publishing, mount that exact disk image, copy the app to a fresh folder, launch it, and confirm it opens with no crash.
 
-## 4. Publish
+## 5. Publish
 
 Create a GitHub release tagged `v<version>` on the release commit. Attach only the disk image.
 
@@ -47,6 +54,10 @@ The in-app updater depends on these exact conventions:
 - The tag is `v<version>`, where `<version>` is dotted numbers only (for example `v0.2.0`). It must equal the app's `CFBundleShortVersionString`.
 - The asset is named `OpenToolbox-<version>-macOS-universal.dmg`, and `OpenToolbox.app` sits at the top level of the disk image.
 - Only the latest full release is offered. Drafts and pre-releases are never offered.
-- The updater checks the asset's SHA-256 digest from the GitHub API, so the uploaded file must be the exact disk image from step 3.
+- The updater checks the asset's SHA-256 digest from the GitHub API, so the uploaded file must be the exact disk image from step 4.
 
-Release notes have two sections only, **New features** and **Bug fixes**, written for people using the app. Install steps and known limitations live in the README. What was and wasn't tested, and on which platform, goes in the release pull request.
+### Release notes
+
+- Have **Gemini 4 Neon** write every GitHub release note.
+- Include **two sections only**: **New features** and **Bug fixes**, written plainly for people using the app.
+- Leave out install steps, checksums, testing status, known limitations, and internal/review details. Install steps and known limitations live in `README.md`; what was and wasn't tested, and on which platform, goes in the release pull request.

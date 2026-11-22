@@ -362,34 +362,36 @@ struct V04ToolTests {
 
             let replacedNoLoop = try await FFmpegTools.replaceAudio(
                 video: video, audio: audio, loopAudioToFit: false, ffmpeg: fakeFFmpeg, ffprobe: nil,
-                output: output, tool: "media.replace-audio"
-            ) { _, args, _, _ in
-                #expect(args.contains("-af"))
-                #expect(args.contains("apad"))
-                #expect(args.contains("-shortest"))
-                if let outPath = args.last {
-                    try Data("rendered".utf8).write(to: URL(fileURLWithPath: outPath))
+                output: output, tool: "media.replace-audio",
+                runner: { _, args, _, _ in
+                    #expect(args.contains("-af"))
+                    #expect(args.contains("apad"))
+                    #expect(args.contains("-shortest"))
+                    if let outPath = args.last {
+                        try Data("rendered".utf8).write(to: URL(fileURLWithPath: outPath))
+                    }
+                    return EngineProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
                 }
-                return EngineProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
-            }
+            )
             #expect(replacedNoLoop.lastPathComponent == "clip new audio.mp4")
 
             let newlineClip = directory.appending(path: "clip\nsecond.mp4")
             try Data("v2".utf8).write(to: newlineClip)
             let merged = try await FFmpegTools.mergeVideos(
                 [video, newlineClip], reencodeToMatch: false, ffmpeg: fakeFFmpeg, ffprobe: nil,
-                output: output, tool: "media.merge-videos"
-            ) { _, args, cwd, _ in
-                #expect(args.contains("-safe"))
-                #expect(args.contains("1"))
-                let stage = try #require(cwd)
-                let list = try String(contentsOf: stage.appending(path: "concat.txt"), encoding: .utf8)
-                #expect(list == "file 'clip-0.mp4'\nfile 'clip-1.mp4'")
-                if let outPath = args.last {
-                    try Data("merged".utf8).write(to: URL(fileURLWithPath: outPath))
+                output: output, tool: "media.merge-videos",
+                runner: { _, args, cwd, _ in
+                    #expect(args.contains("-safe"))
+                    #expect(args.contains("1"))
+                    let stage = try #require(cwd)
+                    let list = try String(contentsOf: stage.appending(path: "concat.txt"), encoding: .utf8)
+                    #expect(list == "file 'clip-0.mp4'\nfile 'clip-1.mp4'")
+                    if let outPath = args.last {
+                        try Data("merged".utf8).write(to: URL(fileURLWithPath: outPath))
+                    }
+                    return EngineProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
                 }
-                return EngineProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
-            }
+            )
             #expect(merged.lastPathComponent == "clip merged.mp4")
 
             let convertedAudio = try await FFmpegTools.convertAudio(audio, format: .flac, ffmpeg: fakeFFmpeg, ffprobe: nil, output: output, tool: "media.convert-audio", runner: mockRunner)

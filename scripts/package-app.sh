@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Builds an unsigned (ad-hoc signed) universal OpenToolbox.app and its release disk image.
 #
-# Usage: scripts/package-app.sh [version] [build-number]
+# Usage: scripts/package-app.sh <version> [build-number]
 # Output: .build/release-app/dist/OpenToolbox.app and OpenToolbox-<version>-macOS-universal.dmg (+ .sha256)
 set -euo pipefail
 
-VERSION="${1:-0.1.0}"
+VERSION="${1:?usage: scripts/package-app.sh <version> [build-number]}"
 BUILD_NUMBER="${2:-1}"
 BUNDLE_ID="io.github.letterxbox.OpenToolbox"
 MIN_MACOS="15.0"
+MIN_MACOS_PATTERN="${MIN_MACOS//./\\.}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$ROOT/.build/release-app"
@@ -16,6 +17,8 @@ DERIVED="$WORK/DerivedData"
 DIST="$WORK/dist"
 PRODUCTS="$DERIVED/Build/Products/Release"
 APP="$DIST/OpenToolbox.app"
+SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+SDK_PATTERN="${SDK_VERSION//./\\.}"
 
 rm -rf "$WORK"
 mkdir -p "$DIST"
@@ -24,6 +27,7 @@ echo "==> Building Release (arm64 + x86_64)"
 xcodebuild \
     -scheme OpenToolbox \
     -configuration Release \
+    -sdk macosx \
     -destination 'generic/platform=macOS' \
     -derivedDataPath "$DERIVED" \
     ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
@@ -48,9 +52,17 @@ echo "==> Assembling $APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 ditto "$PRODUCTS/OpenToolbox" "$APP/Contents/MacOS/OpenToolbox"
 
+for arch in arm64 x86_64; do
+    linked="$(vtool -arch "$arch" -show-build "$APP/Contents/MacOS/OpenToolbox")"
+    if ! grep -Eq '^ *platform MACOS$' <<<"$linked" || ! grep -Eq "^ *minos $MIN_MACOS_PATTERN\$" <<<"$linked"; then
+        echo "error: the linked $arch slice does not target macOS $MIN_MACOS:" >&2
+        echo "$linked" >&2
+        exit 1
+    fi
+done
+
 # SwiftPM records the deployment target as the executable's SDK version, which makes
 # macOS draw the app in its old-SDK compatibility style. Record the SDK it was built with.
-SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
 vtool -set-build-version macos "$MIN_MACOS" "$SDK_VERSION" -replace \
     -output "$WORK/OpenToolbox.retagged" "$APP/Contents/MacOS/OpenToolbox"
 mv "$WORK/OpenToolbox.retagged" "$APP/Contents/MacOS/OpenToolbox"
@@ -106,7 +118,7 @@ for arch in arm64 x86_64; do
     echo "-- $arch"
     build="$(vtool -arch "$arch" -show-build "$APP/Contents/MacOS/OpenToolbox")"
     echo "$build" | grep -E 'platform|minos|sdk'
-    if ! echo "$build" | grep -Eq "minos $MIN_MACOS\$" || ! echo "$build" | grep -Eq "sdk $SDK_VERSION\$"; then
+    if ! grep -Eq "^ *minos $MIN_MACOS_PATTERN\$" <<<"$build" || ! grep -Eq "^ *sdk $SDK_PATTERN\$" <<<"$build"; then
         echo "error: $arch slice must record minos $MIN_MACOS and sdk $SDK_VERSION" >&2
         exit 1
     fi

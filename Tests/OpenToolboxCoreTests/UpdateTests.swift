@@ -58,6 +58,9 @@ struct UpdateTests {
         #expect(throws: UpdateError.invalidResponse) {
             try UpdateFeed.evaluate(Self.release(tag: "nightly"), current: current)
         }
+        #expect(throws: UpdateError.invalidResponse) {
+            try UpdateFeed.evaluate(Self.release(tag: "0.2.0"), current: current)
+        }
     }
 
     @Test func checkerMapsHTTPStatus() async throws {
@@ -96,28 +99,65 @@ struct UpdateTests {
         #expect(!command.arguments[1].contains(app.path))
     }
 
-    @Test func installSwapsStagedAppAndRemovesOldCopy() throws {
-        try withTemporaryDirectorySync { root in
+    @Test func installSwapsStagedAppAndRemovesOldCopy() async throws {
+        try await withTemporaryDirectory { root in
             let installed = try Self.makeApp(in: root, version: "0.1.0")
-            let staged = try Self.makeApp(in: root, version: "0.2.0",
-                name: "\(UpdateInstaller.stagedPrefix)\(UUID().uuidString).app")
-            let installer = UpdateInstaller(workRoot: root.appending(path: "work"))
-            try installer.install(PreparedUpdate(version: AppVersion("0.2.0")!, stagedApp: staged, installedApp: installed))
+            let prepared = try await Self.stagedUpdate(next: installed, version: "0.2.0")
+            try UpdateInstaller(workRoot: root.appending(path: "work")).install(prepared)
             #expect(UpdateInstaller.bundleInfo(at: installed)?.version == AppVersion("0.2.0"))
-            #expect(!FileManager.default.fileExists(atPath: staged.path))
+            #expect(!FileManager.default.fileExists(atPath: prepared.stagedApp.path))
         }
     }
 
-    @Test func installRefusesUnexpectedStagedPaths() throws {
-        try withTemporaryDirectorySync { root in
+    @Test func installRefusesUnexpectedStagedPaths() async throws {
+        try await withTemporaryDirectory { root in
             let installed = try Self.makeApp(in: root, version: "0.1.0")
-            let other = try Self.makeApp(in: root, version: "0.2.0", name: "Other.app")
-            let installer = UpdateInstaller(workRoot: root.appending(path: "work"))
+            let prepared = try await Self.stagedUpdate(next: installed, version: "0.2.0")
+            let other = root.appending(path: "Other.app", directoryHint: .isDirectory)
+            try FileManager.default.copyItem(at: prepared.stagedApp, to: other)
+            let unexpected = PreparedUpdate(
+                version: prepared.version, stagedApp: other, installedApp: installed,
+                installedIdentity: prepared.installedIdentity, codeHash: prepared.codeHash)
             #expect(throws: UpdateError.self) {
-                try installer.install(PreparedUpdate(version: AppVersion("0.2.0")!, stagedApp: other, installedApp: installed))
+                try UpdateInstaller(workRoot: root.appending(path: "work")).install(unexpected)
             }
             #expect(UpdateInstaller.bundleInfo(at: installed)?.version == AppVersion("0.1.0"))
             #expect(FileManager.default.fileExists(atPath: other.path))
+        }
+    }
+
+    @Test func installLeavesAReplacedDestinationInPlace() async throws {
+        try await withTemporaryDirectory { root in
+            let installed = try Self.makeApp(in: root, version: "0.1.0")
+            let prepared = try await Self.stagedUpdate(next: installed, version: "0.2.0")
+            let moved = root.appending(path: "Moved.app", directoryHint: .isDirectory)
+            try FileManager.default.moveItem(at: installed, to: moved)
+            try Self.makeApp(in: root, version: "0.1.5")
+
+            #expect(throws: UpdateError.self) {
+                try UpdateInstaller(workRoot: root.appending(path: "work")).install(prepared)
+            }
+            #expect(UpdateInstaller.bundleInfo(at: installed)?.version == AppVersion("0.1.5"))
+            #expect(UpdateInstaller.bundleInfo(at: moved)?.version == AppVersion("0.1.0"))
+            #expect(UpdateInstaller.bundleInfo(at: prepared.stagedApp)?.version == AppVersion("0.2.0"))
+        }
+    }
+
+    @Test func installRefusesAStagedAppChangedAfterVerification() async throws {
+        try await withTemporaryDirectory { root in
+            let installed = try Self.makeApp(in: root, version: "0.1.0")
+            let prepared = try await Self.stagedUpdate(next: installed, version: "0.2.0")
+            let installer = UpdateInstaller(workRoot: root.appending(path: "work"))
+            let executable = prepared.stagedApp.appending(path: "Contents/MacOS/OpenToolbox")
+            try FileManager.default.removeItem(at: executable)
+            try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/echo"), to: executable)
+
+            #expect(throws: UpdateError.self) { try installer.install(prepared) }
+            _ = try await SystemUpdateCommandRunner().run(
+                "/usr/bin/codesign", arguments: ["--force", "--deep", "--sign", "-", prepared.stagedApp.path])
+            #expect(throws: UpdateError.self) { try installer.install(prepared) }
+            #expect(UpdateInstaller.bundleInfo(at: installed)?.version == AppVersion("0.1.0"))
+            #expect(FileManager.default.fileExists(atPath: prepared.stagedApp.path))
         }
     }
 
@@ -178,10 +218,11 @@ struct UpdateTests {
         }
     }
 
-    @Test func diskImageWithWrongVersionIsRejected() async throws {
+    @Test(arguments: ["0.3.0", "0.2"])
+    func diskImageWithWrongVersionIsRejected(imageVersion: String) async throws {
         try await withTemporaryDirectory { root in
             let installed = try Self.makeApp(in: root, version: "0.1.0")
-            let image = try await Self.makeDiskImage(in: root, version: "0.3.0")
+            let image = try await Self.makeDiskImage(in: root, version: imageVersion)
             let update = Self.update(version: "0.2.0", image: image,
                 sha256: try HashGenerator.hashFile(at: image, algorithm: .sha256))
             let installer = UpdateInstaller(
@@ -193,6 +234,28 @@ struct UpdateTests {
             let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
             #expect(!names.contains(where: { UpdateInstaller.isStagedName($0) }))
             #expect(try FileManager.default.contentsOfDirectory(atPath: root.appending(path: "work").path).isEmpty)
+        }
+    }
+
+    @Test func cancellingAfterMountingDetachesAndLeavesNoStagedCopy() async throws {
+        try await withTemporaryDirectory { root in
+            let installed = try Self.makeApp(in: root, version: "0.1.0")
+            let image = try await Self.makeDiskImage(in: root, version: "0.2.0")
+            let update = Self.update(version: "0.2.0", image: image,
+                sha256: try HashGenerator.hashFile(at: image, algorithm: .sha256))
+            let commands = CancelAfterAttach()
+            let installer = UpdateInstaller(
+                downloader: LocalFileDownloader(files: [update.diskImageURL: image]), commands: commands,
+                workRoot: root.appending(path: "work"))
+            let task = Task { try await installer.prepare(update, replacing: installed) { _ in } }
+            commands.cancelAfterAttach(task)
+
+            await #expect(throws: CancellationError.self) { try await task.value }
+            let info = try await SystemUpdateCommandRunner().run("/usr/bin/hdiutil", arguments: ["info"])
+            #expect(!String(decoding: info, as: UTF8.self).contains(root.lastPathComponent))
+            let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+            #expect(!names.contains(where: { UpdateInstaller.isStagedName($0) }))
+            #expect(UpdateInstaller.bundleInfo(at: installed)?.version == AppVersion("0.1.0"))
         }
     }
 
@@ -253,6 +316,17 @@ struct UpdateTests {
             diskImageName: name,
             diskImageURL: URL(string: "https://github.com/LetterXbox/OpenToolbox/releases/download/v\(version)/\(name)")!,
             sizeBytes: size, sha256: sha256)
+    }
+
+    static func stagedUpdate(next installed: URL, version: String) async throws -> PreparedUpdate {
+        let staged = try makeApp(in: installed.deletingLastPathComponent(), version: version,
+            name: "\(UpdateInstaller.stagedPrefix)\(UUID().uuidString).app")
+        _ = try await SystemUpdateCommandRunner().run(
+            "/usr/bin/codesign", arguments: ["--force", "--deep", "--sign", "-", staged.path])
+        return PreparedUpdate(
+            version: try #require(AppVersion(version)), stagedApp: staged, installedApp: installed,
+            installedIdentity: try #require(UpdateInstaller.fileIdentity(at: installed)),
+            codeHash: try #require(UpdateInstaller.codeHash(of: staged)))
     }
 
     @discardableResult
@@ -327,5 +401,24 @@ final class RecordingCommands: UpdateCommandRunner, @unchecked Sendable {
     func run(_ executable: String, arguments: [String]) async throws -> Data {
         lock.withLock { _calls.append([executable] + arguments) }
         throw UpdateError.installFailed("not expected")
+    }
+}
+
+final class CancelAfterAttach: UpdateCommandRunner, @unchecked Sendable {
+    private let lock = NSLock()
+    private let system = SystemUpdateCommandRunner()
+    private var target: Task<PreparedUpdate, Error>?
+
+    func cancelAfterAttach(_ task: Task<PreparedUpdate, Error>) {
+        lock.withLock { target = task }
+    }
+
+    func run(_ executable: String, arguments: [String]) async throws -> Data {
+        let output = try await system.run(executable, arguments: arguments)
+        if arguments.first == "attach" {
+            while lock.withLock({ target }) == nil { try await Task.sleep(for: .milliseconds(10)) }
+            lock.withLock { target }?.cancel()
+        }
+        return output
     }
 }

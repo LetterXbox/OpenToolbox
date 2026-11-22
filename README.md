@@ -92,7 +92,9 @@ shasum -a 256 OpenToolbox-<version>-macOS-universal.dmg
 
 Choose **OpenToolbox → Check for Updates…** to look for a newer release on GitHub. In **Settings → Updates** you can turn on a daily automatic check and, optionally, automatic download and install. Both are off by default.
 
-An update is installed only after the disk image matches the SHA-256 checksum GitHub publishes for it, and the app inside has the OpenToolbox bundle identifier, the release's version number, and a valid code signature. It replaces the app when you restart or quit. If OpenToolbox can't write to its own folder, or macOS is running it from a temporary location, the update window links to the release page instead.
+An update is installed only after the disk image matches the SHA-256 checksum GitHub publishes for it, and the app inside has the OpenToolbox bundle identifier, the release's version number, and a valid code signature. It replaces the app when you restart or quit. Just before replacing it, OpenToolbox checks again that the downloaded copy is the one it verified and that the app it is replacing hasn't been moved or replaced in the meantime. If OpenToolbox can't write to its own folder, or macOS is running it from a temporary location, the update window links to the release page instead.
+
+Turning on the automatic check checks right away. Turning off automatic download and install stops an automatic download that is under way and discards an automatically downloaded update that hasn't been installed yet.
 
 ## Known Limitations
 
@@ -100,6 +102,8 @@ An update is installed only after the disk image matches the SHA-256 checksum Gi
 - Switching to another tool resets the one you left and stops a running Network Speed Test.
 - With two OpenToolbox windows open, `⌘K` shows Quick Open in both.
 - Releases are ad-hoc signed, so an update's code signature proves the app is intact but not who built it. Trust in an update rests on the GitHub release it comes from.
+- If an update can't be installed when you quit (for example, because the app's folder has become read-only), OpenToolbox quits on the current version without saying so. Choose **Check for Updates…** to try again.
+- If you run two copies of OpenToolbox at once, the one you open later can discard an update the other has downloaded but not yet installed. Choose **Check for Updates…** in the remaining copy to download it again.
 
 ## Building from Source
 

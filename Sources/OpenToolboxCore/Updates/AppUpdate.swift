@@ -118,6 +118,7 @@ public enum UpdateFeed {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         guard let release = try? decoder.decode(GitHubRelease.self, from: data),
+            release.tagName.hasPrefix("v"),
             let version = AppVersion(release.tagName)
         else { throw UpdateError.invalidResponse }
         guard !release.draft, !release.prerelease, version > current else {

@@ -18,17 +18,26 @@ final class UpdateCenter {
 
     private(set) var phase: Phase = .idle
     private(set) var lastChecked: Date?
+    private var lastAutomaticAttempt: Date?
+    private var isAutomaticTransaction = false
     var windowRequest = 0
 
     var checksAutomatically: Bool {
         didSet {
             defaults.set(checksAutomatically, forKey: Self.checksKey)
-            if checksAutomatically { checkIfDue() } else { installsAutomatically = false }
+            if !checksAutomatically {
+                installsAutomatically = false
+            } else if !oldValue {
+                checkNow(userInitiated: false)
+            }
         }
     }
 
     var installsAutomatically: Bool {
-        didSet { defaults.set(installsAutomatically, forKey: Self.installsKey) }
+        didSet {
+            defaults.set(installsAutomatically, forKey: Self.installsKey)
+            if oldValue, !installsAutomatically { discardAutomaticUpdate() }
+        }
     }
 
     let currentVersion: AppVersion?
@@ -44,6 +53,7 @@ final class UpdateCenter {
     private static let checksKey = "UpdatesCheckAutomatically"
     private static let installsKey = "UpdatesInstallAutomatically"
     private static let lastCheckedKey = "UpdatesLastChecked"
+    private static let lastAutomaticAttemptKey = "UpdatesLastAutomaticAttempt"
     private static let interval: TimeInterval = 24 * 60 * 60
 
     init(defaults: UserDefaults = .standard, bundle: Bundle = .main) {
@@ -54,6 +64,7 @@ final class UpdateCenter {
         checksAutomatically = defaults.bool(forKey: Self.checksKey)
         installsAutomatically = defaults.bool(forKey: Self.installsKey)
         lastChecked = defaults.object(forKey: Self.lastCheckedKey) as? Date
+        lastAutomaticAttempt = defaults.object(forKey: Self.lastAutomaticAttemptKey) as? Date
         installer = (try? UpdateInstaller.defaultWorkRoot()).map { UpdateInstaller(workRoot: $0) }
 
         if unsupportedReason == nil { installer?.removeLeftovers(next: appURL) }
@@ -79,6 +90,7 @@ final class UpdateCenter {
     func checkNow(userInitiated: Bool) {
         guard let currentVersion, !isBusy else { return }
         if case .ready = phase { return }
+        if !userInitiated { recordAutomaticAttempt() }
         phase = .checking
         task = Task {
             do {
@@ -91,7 +103,7 @@ final class UpdateCenter {
                 case .available(let update):
                     phase = .available(update)
                     if !userInitiated, installsAutomatically, canInstall {
-                        download(update, presentWhenReady: true)
+                        download(update, automatic: true)
                     } else if !userInitiated {
                         windowRequest += 1
                     }
@@ -103,7 +115,7 @@ final class UpdateCenter {
     }
 
     func install(_ update: AppUpdate) {
-        download(update, presentWhenReady: false)
+        download(update, automatic: false)
     }
 
     func cancel() {
@@ -131,7 +143,8 @@ final class UpdateCenter {
     /// Installs a prepared update without reopening, used when the app quits.
     func installOnQuit() {
         task?.cancel()
-        guard case .ready(let prepared) = phase, let installer else { return }
+        guard case .ready(let prepared) = phase, let installer, !isAutomaticTransaction || installsAutomatically
+        else { return }
         try? installer.install(prepared)
         phase = .idle
     }
@@ -142,13 +155,35 @@ final class UpdateCenter {
 
     private func checkIfDue() {
         guard checksAutomatically, canCheck else { return }
-        if let lastChecked, Date().timeIntervalSince(lastChecked) < Self.interval { return }
+        if let last = [lastChecked, lastAutomaticAttempt].compactMap({ $0 }).max(),
+            Date().timeIntervalSince(last) < Self.interval
+        { return }
         checkNow(userInitiated: false)
+    }
+
+    private func discardAutomaticUpdate() {
+        guard isAutomaticTransaction else { return }
+        switch phase {
+        case .downloading:
+            task?.cancel()
+        case .ready(let prepared):
+            installer?.discard(prepared)
+            isAutomaticTransaction = false
+            phase = .idle
+        default:
+            break
+        }
     }
 
     private func showProgress(_ fraction: Double, for update: AppUpdate) {
         guard case .downloading(let current, _) = phase, current == update else { return }
         phase = .downloading(update, fraction)
+    }
+
+    private func recordAutomaticAttempt() {
+        let now = Date()
+        lastAutomaticAttempt = now
+        defaults.set(now, forKey: Self.lastAutomaticAttemptKey)
     }
 
     private func recordCheck() {
@@ -157,8 +192,9 @@ final class UpdateCenter {
         defaults.set(now, forKey: Self.lastCheckedKey)
     }
 
-    private func download(_ update: AppUpdate, presentWhenReady: Bool) {
+    private func download(_ update: AppUpdate, automatic: Bool) {
         guard canInstall, let installer, !isBusy else { return }
+        isAutomaticTransaction = automatic
         phase = .downloading(update, 0)
         let appURL = appURL
         let cleanup = cleanup
@@ -168,10 +204,15 @@ final class UpdateCenter {
                 let prepared = try await installer.prepare(update, replacing: appURL) { fraction in
                     Task { @MainActor in self.showProgress(fraction, for: update) }
                 }
+                guard !Task.isCancelled else {
+                    installer.discard(prepared)
+                    phase = .available(update)
+                    return
+                }
                 phase = .ready(prepared)
-                if presentWhenReady { windowRequest += 1 }
+                if automatic { windowRequest += 1 }
             } catch {
-                if Task.isCancelled || presentWhenReady {
+                if Task.isCancelled || automatic {
                     phase = .available(update)
                 } else {
                     phase = .failed(error.localizedDescription)

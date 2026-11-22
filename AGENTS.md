@@ -17,7 +17,7 @@ Open-source, pure native macOS (Swift / SwiftUI, macOS 15+) utility suite with o
 - **Pure native Swift / SwiftUI** targeting macOS 15+ (Swift Package Manager).
 - **On-demand downloads only:** Pure-Swift and Apple-framework tools add 0 MB external weight. External engines live in `~/Library/Application Support/OpenToolbox/engines/`, downloaded only when the user enables/downloads a tool requiring them, verified by SHA-256, deduplicated across tools, and individually removable.
 - **Originals untouched:** File tools must write new files to an output directory without silently overwriting originals.
-- **Privacy first:** Offline by default; network access occurs only for explicit user-triggered actions (engine downloads, video URL downloads, network speed tests, update checks, Web Page to PDF, the Coordinate Picker map, and the language downloads macOS makes for Translate and Transcribe) and the opt-in daily update check (off by default).
+- **Privacy first:** Offline by default; network access occurs only for explicit user-triggered actions (engine downloads, video URL downloads, network speed tests, update checks, Web Page to PDF, the Coordinate Picker map, Scan Document's Find Network Scanners, and the language downloads macOS makes for Translate and Transcribe) and the opt-in daily update check (off by default).
 
 ## Building and testing
 

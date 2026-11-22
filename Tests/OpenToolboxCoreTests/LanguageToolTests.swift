@@ -135,7 +135,7 @@ struct SummarizerTests {
 struct SpeechSynthesisTests {
     @Test func refusesEmptyText() async throws {
         try await withTemporaryDirectory { directory in
-            await #expect(throws: SpeechSynthesisError.emptyText) {
+            _ = await #expect(throws: SpeechSynthesisError.emptyText) {
                 try await SpeechSynthesis.export(" ", voice: nil, rate: 0.5, to: directory.appending(path: "a.m4a"))
             }
         }

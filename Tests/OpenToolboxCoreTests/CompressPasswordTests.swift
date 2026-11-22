@@ -6,23 +6,23 @@ import Testing
 
 @testable import OpenToolboxCore
 
-/// A detailed image that compresses measurably, so quality changes show in the file size.
+/// An opaque image of random pixels, which lossless formats can't shrink, so quality
+/// changes show in the file size.
 func makeNoisyImage(width: Int, height: Int) throws -> CGImage {
-    let context = try #require(
-        CGContext(
-            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
     var generator = SystemRandomNumberGenerator()
-    for y in stride(from: 0, to: height, by: 4) {
-        for x in stride(from: 0, to: width, by: 4) {
-            context.setFillColor(
-                CGColor(
-                    red: CGFloat.random(in: 0...1, using: &generator), green: CGFloat(x) / CGFloat(width),
-                    blue: CGFloat(y) / CGFloat(height), alpha: 1))
-            context.fill(CGRect(x: x, y: y, width: 4, height: 4))
-        }
+    var bytes = [UInt8](repeating: 255, count: width * height * 4)
+    for index in stride(from: 0, to: bytes.count, by: 4) {
+        bytes[index] = UInt8.random(in: 0...255, using: &generator)
+        bytes[index + 1] = UInt8((index / 4) % width * 255 / max(width - 1, 1))
+        bytes[index + 2] = UInt8.random(in: 0...255, using: &generator)
     }
-    return try #require(context.makeImage())
+    let provider = try #require(CGDataProvider(data: Data(bytes) as CFData))
+    return try #require(
+        CGImage(
+            width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue), provider: provider,
+            decode: nil, shouldInterpolate: false, intent: .defaultIntent))
 }
 
 func samplePDF(pages: Int) throws -> PDFDocument {

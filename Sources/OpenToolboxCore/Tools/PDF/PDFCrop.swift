@@ -47,13 +47,12 @@ public enum PDFCrop {
             case 270: (margins.left, margins.bottom, margins.right, margins.top)
             default: (margins.top, margins.left, margins.bottom, margins.right)
             }
-        let rect = CGRect(
-            x: box.minX + left, y: box.minY + bottom,
-            width: box.width - left - right, height: box.height - top - bottom)
+        let width = box.width - left - right
+        let height = box.height - top - bottom
         guard [top, left, bottom, right].allSatisfy({ $0 >= 0 && $0.isFinite }),
-            rect.width >= minimumSide, rect.height >= minimumSide
+            width >= minimumSide, height >= minimumSide
         else { return nil }
-        return rect
+        return CGRect(x: box.minX + left, y: box.minY + bottom, width: width, height: height)
     }
 
     /// A copy with the given 0-based pages (all when `nil`) cropped by `margins`.

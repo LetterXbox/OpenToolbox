@@ -17,6 +17,34 @@ private func temporaryFile(named name: String) throws -> URL {
     return folder.appending(path: name)
 }
 
+private func recordingSize(_ url: URL) throws -> Int? {
+    try url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+}
+
+private func isMissing(_ error: Error) -> Bool {
+    let error = error as NSError
+    switch error.domain {
+    case NSCocoaErrorDomain:
+        return error.code == CocoaError.fileReadNoSuchFile.rawValue || error.code == CocoaError.fileNoSuchFile.rawValue
+    case NSPOSIXErrorDomain:
+        return error.code == Int(ENOENT)
+    default:
+        return false
+    }
+}
+
+private func removeIfEmpty(_ recording: URL, fileSize: (URL) throws -> Int? = recordingSize) -> Bool {
+    let isEmpty: Bool
+    do {
+        isEmpty = try fileSize(recording) == 0
+        if isEmpty { try? FileManager.default.removeItem(at: recording) }
+    } catch {
+        isEmpty = isMissing(error)
+    }
+    if isEmpty { rmdir(recording.deletingLastPathComponent().path) }
+    return isEmpty
+}
+
 private func saveRecording(
     _ temporary: URL, named name: String, output: OutputDirectory, tool: ToolID, store: RecordingStore = .standard()
 ) -> (saved: URL?, failure: String?) {
@@ -264,12 +292,7 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
     private func fail(_ error: Error) {
         defer { reset() }
         failure = error.localizedDescription
-        guard let temporary else { return }
-        let size = (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        guard size > 0, let destination else {
-            try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent())
-            return
-        }
+        guard let temporary, !removeIfEmpty(temporary), let destination else { return }
         let result = saveRecording(
             temporary, named: recordingName("Screen Recording", extension: "mov"), output: destination.output,
             tool: destination.tool)
@@ -478,7 +501,7 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
     @ObservationIgnored private var audioOutput: AVCaptureAudioFileOutput?
     @ObservationIgnored private var temporary: URL?
     @ObservationIgnored private var meterTask: Task<Void, Never>?
-    @ObservationIgnored var fileSize: (URL) throws -> Int? = { try $0.resourceValues(forKeys: [.fileSizeKey]).fileSize }
+    @ObservationIgnored var fileSize: (URL) throws -> Int? = recordingSize
 
     init(defaults: UserDefaults = .standard, store: RecordingStore = .standard()) {
         self.defaults = defaults
@@ -631,15 +654,7 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
     private func finish(problem: String?) {
         defer { reset() }
         guard let temporary, let destination else { return }
-        let isEmpty: Bool
-        do {
-            isEmpty = try fileSize(temporary) == 0
-            if isEmpty { try? FileManager.default.removeItem(at: temporary) }
-        } catch {
-            isEmpty = Self.isMissing(error)
-        }
-        guard !isEmpty else {
-            rmdir(temporary.deletingLastPathComponent().path)
+        guard !removeIfEmpty(temporary, fileSize: fileSize) else {
             failure = problem.map { L("Recording failed: \($0)") } ?? L("Nothing was recorded.")
             return
         }
@@ -651,18 +666,6 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
             failure = [problem, message].compactMap { $0 }.joined(separator: " ")
         } else if let problem {
             failure = L("Recording stopped early: \(problem) What was recorded was saved.")
-        }
-    }
-
-    private static func isMissing(_ error: Error) -> Bool {
-        let error = error as NSError
-        switch error.domain {
-        case NSCocoaErrorDomain:
-            return error.code == CocoaError.fileReadNoSuchFile.rawValue || error.code == CocoaError.fileNoSuchFile.rawValue
-        case NSPOSIXErrorDomain:
-            return error.code == Int(ENOENT)
-        default:
-            return false
         }
     }
 

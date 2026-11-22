@@ -106,6 +106,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSDownloadsFolderUsageDescription</key><string>OpenToolbox opens files you choose and writes results to the output folder you pick.</string>
     <key>NSRemovableVolumesUsageDescription</key><string>OpenToolbox opens files you choose on external drives.</string>
     <key>NSNetworkVolumesUsageDescription</key><string>OpenToolbox opens files you choose on network drives.</string>
+    <key>NSLocationUsageDescription</key><string>Wi-Fi Password uses Location Services only to read the name of the Wi-Fi network this Mac is joined to.</string>
+    <key>NSLocationWhenInUseUsageDescription</key><string>Wi-Fi Password uses Location Services only to read the name of the Wi-Fi network this Mac is joined to.</string>
 </dict>
 </plist>
 PLIST

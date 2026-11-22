@@ -40,16 +40,15 @@ public struct PDFProtection: Equatable, Sendable {
         self.allowsEditing = allowsEditing
     }
 
-    var permissions: PDFAccessPermissions {
-        var result: PDFAccessPermissions = [.allowsContentAccessibility]
-        if allowsPrinting { result.formUnion([.allowsLowQualityPrinting, .allowsHighQualityPrinting]) }
-        if allowsCopying { result.insert(.allowsContentCopying) }
+    /// PDFKit imports the permission flags as an enumeration, so they are combined as raw bits.
+    var permissions: UInt {
+        var granted: [PDFAccessPermissions] = [.allowsContentAccessibility]
+        if allowsPrinting { granted += [.allowsLowQualityPrinting, .allowsHighQualityPrinting] }
+        if allowsCopying { granted.append(.allowsContentCopying) }
         if allowsEditing {
-            result.formUnion([
-                .allowsDocumentChanges, .allowsDocumentAssembly, .allowsCommenting, .allowsFormFieldEntry,
-            ])
+            granted += [.allowsDocumentChanges, .allowsDocumentAssembly, .allowsCommenting, .allowsFormFieldEntry]
         }
-        return result
+        return granted.reduce(0) { $0 | $1.rawValue }
     }
 }
 
@@ -64,7 +63,7 @@ public enum PDFSecurity {
         let options: [PDFDocumentWriteOption: Any] = [
             .userPasswordOption: protection.openPassword,
             .ownerPasswordOption: owner,
-            .accessPermissionsOption: protection.permissions.rawValue,
+            .accessPermissionsOption: protection.permissions,
         ]
         let base = source.deletingPathExtension().lastPathComponent
         return try output.writeNewFile(for: tool, preferredName: base + " protected.pdf") { url in

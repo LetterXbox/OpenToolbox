@@ -86,13 +86,11 @@ public enum ToolCatalog {
         ToolDescriptor(
             id: "dev.color-picker", category: .developer,
             title: "Color Picker", summary: "Pick a color anywhere on screen and copy it as hex, RGB, or HSL.",
-            symbolName: "eyedropper", keywords: ["color", "colour", "picker", "eyedropper", "hex", "rgb", "hsl"],
-            availability: .planned),
+            symbolName: "eyedropper", keywords: ["color", "colour", "picker", "eyedropper", "hex", "rgb", "hsl"]),
         ToolDescriptor(
             id: "dev.coordinates", category: .developer,
             title: "Coordinate Picker", summary: "Find a place on a map and copy its latitude and longitude.",
-            symbolName: "mappin.and.ellipse", keywords: ["coordinates", "latitude", "longitude", "gps", "map", "location", "geo"],
-            availability: .planned),
+            symbolName: "mappin.and.ellipse", keywords: ["coordinates", "latitude", "longitude", "gps", "map", "location", "geo"]),
     ]
 
     // MARK: - Text & Files
@@ -182,8 +180,7 @@ public enum ToolCatalog {
         ToolDescriptor(
             id: "pdf.crop", category: .imagesAndPDF,
             title: "Crop PDF", summary: "Trim the margins of PDF pages.",
-            symbolName: "crop", keywords: ["pdf", "crop", "margins", "trim"],
-            availability: .planned),
+            symbolName: "crop", keywords: ["pdf", "crop", "margins", "trim"]),
         ToolDescriptor(
             id: "pdf.password", category: .imagesAndPDF,
             title: "PDF Password", summary: "Add a password to a PDF or remove one.",
@@ -239,13 +236,11 @@ public enum ToolCatalog {
         ToolDescriptor(
             id: "mac.wifi", category: .macUtilities,
             title: "Wi-Fi Password", summary: "Show a saved Wi-Fi password and share it as a QR code.",
-            symbolName: "wifi", keywords: ["wifi", "wi-fi", "password", "network", "qr", "share"],
-            availability: .planned),
+            symbolName: "wifi", keywords: ["wifi", "wi-fi", "password", "network", "qr", "share"]),
         ToolDescriptor(
             id: "mac.permissions", category: .macUtilities,
             title: "Reset Permissions", summary: "Reset the privacy permissions an app has been given or denied.",
-            symbolName: "hand.raised", keywords: ["permissions", "privacy", "tcc", "tccutil", "camera", "microphone", "screen recording", "reset"],
-            availability: .planned),
+            symbolName: "hand.raised", keywords: ["permissions", "privacy", "tcc", "tccutil", "camera", "microphone", "screen recording", "reset"]),
     ]
 
     // MARK: - Media

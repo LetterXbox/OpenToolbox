@@ -99,7 +99,7 @@ public enum ToolCatalog {
         ToolDescriptor(
             id: "text.qr-code", category: .textAndFiles,
             title: "QR Code", summary: "Generate and read QR codes.",
-            symbolName: "qrcode", keywords: ["qr", "barcode", "scan"], availability: .planned),
+            symbolName: "qrcode", keywords: ["qr", "barcode", "scan"]),
         ToolDescriptor(
             id: "files.batch-rename", category: .textAndFiles,
             title: "Batch Rename", summary: "Rename many files with patterns and previews.",
@@ -116,33 +116,31 @@ public enum ToolCatalog {
         ToolDescriptor(
             id: "image.convert", category: .imagesAndPDF,
             title: "Convert Images", summary: "Convert, resize, and rotate images.",
-            symbolName: "photo", keywords: ["image", "resize", "rotate", "heic", "png", "jpeg", "webp"],
-            availability: .planned),
+            symbolName: "photo", keywords: ["image", "resize", "rotate", "heic", "png", "jpeg", "webp"]),
         ToolDescriptor(
             id: "image.strip-metadata", category: .imagesAndPDF,
             title: "Strip EXIF", summary: "Remove location and camera metadata from images.",
-            symbolName: "eye.slash", keywords: ["exif", "metadata", "gps", "privacy"], availability: .planned),
+            symbolName: "eye.slash", keywords: ["exif", "metadata", "gps", "privacy"]),
         ToolDescriptor(
             id: "image.remove-background", category: .imagesAndPDF,
             title: "Remove Background", summary: "Lift subjects from photos on-device.",
-            symbolName: "person.crop.rectangle", keywords: ["background", "cutout", "subject"],
-            availability: .planned),
+            symbolName: "person.crop.rectangle", keywords: ["background", "cutout", "subject"]),
         ToolDescriptor(
             id: "image.blur-faces", category: .imagesAndPDF,
             title: "Blur Faces", summary: "Detect and blur faces on-device.",
-            symbolName: "face.dashed", keywords: ["blur", "faces", "privacy", "anonymize"], availability: .planned),
+            symbolName: "face.dashed", keywords: ["blur", "faces", "privacy", "anonymize"]),
         ToolDescriptor(
             id: "image.ocr", category: .imagesAndPDF,
             title: "Extract Text (OCR)", summary: "Recognize text in images and PDFs on-device.",
-            symbolName: "text.viewfinder", keywords: ["ocr", "text", "recognize", "scan"], availability: .planned),
+            symbolName: "text.viewfinder", keywords: ["ocr", "text", "recognize", "scan"]),
         ToolDescriptor(
             id: "pdf.organize", category: .imagesAndPDF,
             title: "Organize PDFs", summary: "Merge, split, and reorder PDF pages.",
-            symbolName: "doc.richtext", keywords: ["pdf", "merge", "split", "pages"], availability: .planned),
+            symbolName: "doc.richtext", keywords: ["pdf", "merge", "split", "pages"]),
         ToolDescriptor(
             id: "pdf.images", category: .imagesAndPDF,
             title: "Images ↔ PDF", summary: "Combine images into a PDF or export pages as images.",
-            symbolName: "doc.badge.plus", keywords: ["pdf", "images", "export", "combine"], availability: .planned),
+            symbolName: "doc.badge.plus", keywords: ["pdf", "images", "export", "combine"]),
     ]
 
     // MARK: - Mac Utilities

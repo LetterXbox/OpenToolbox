@@ -146,6 +146,14 @@ enum ToolViewRegistry {
         case "dev.csv-json": CSVJSONView(tool: tool)
         case "text.word-counter": WordCounterView(tool: tool)
         case "text.case-converter": CaseConverterView(tool: tool)
+        case "text.qr-code": QRCodeView(tool: tool)
+        case "image.convert": ImageConvertView(tool: tool)
+        case "image.strip-metadata": StripMetadataView(tool: tool)
+        case "image.remove-background": RemoveBackgroundView(tool: tool)
+        case "image.blur-faces": BlurFacesView(tool: tool)
+        case "image.ocr": OCRView(tool: tool)
+        case "pdf.organize": PDFOrganizeView(tool: tool)
+        case "pdf.images": ImagesPDFView(tool: tool)
         default:
             ContentUnavailableView(
                 tool.localizedTitle,

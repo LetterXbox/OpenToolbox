@@ -149,29 +149,27 @@ public enum ToolCatalog {
         ToolDescriptor(
             id: "mac.keep-awake", category: .macUtilities,
             title: "Keep Awake", summary: "Prevent your Mac from sleeping for a while.",
-            symbolName: "cup.and.saucer", keywords: ["caffeinate", "sleep", "awake"], availability: .planned),
+            symbolName: "cup.and.saucer", keywords: ["caffeinate", "sleep", "awake"]),
         ToolDescriptor(
             id: "mac.battery", category: .macUtilities,
             title: "Battery Health", summary: "Show battery cycle count, capacity, and condition.",
-            symbolName: "battery.75percent", keywords: ["battery", "cycles", "health"], availability: .planned),
+            symbolName: "battery.75percent", keywords: ["battery", "cycles", "health"]),
         ToolDescriptor(
             id: "mac.network-speed", category: .macUtilities,
             title: "Network Speed Test", summary: "Measure network quality with Apple's networkQuality.",
-            symbolName: "speedometer", keywords: ["speed", "network", "internet", "bandwidth"],
-            availability: .planned),
+            symbolName: "speedometer", keywords: ["speed", "network", "internet", "bandwidth"]),
         ToolDescriptor(
             id: "mac.eject", category: .macUtilities,
             title: "Eject All Disks", summary: "Eject every external and disk-image volume.",
-            symbolName: "eject", keywords: ["eject", "unmount", "disk", "volume"], availability: .planned),
+            symbolName: "eject", keywords: ["eject", "unmount", "disk", "volume"]),
         ToolDescriptor(
             id: "mac.quarantine", category: .macUtilities,
             title: "Quarantine Helper", summary: "Inspect and clear the quarantine flag on downloaded files.",
-            symbolName: "checkmark.shield", keywords: ["xattr", "quarantine", "gatekeeper"], availability: .planned),
+            symbolName: "checkmark.shield", keywords: ["xattr", "quarantine", "gatekeeper"]),
         ToolDescriptor(
             id: "mac.hidden-settings", category: .macUtilities,
             title: "Hidden Settings", summary: "Toggle documented hidden macOS preferences.",
-            symbolName: "gearshape.2", keywords: ["defaults", "hidden", "preferences", "tweaks"],
-            availability: .planned),
+            symbolName: "gearshape.2", keywords: ["defaults", "hidden", "preferences", "tweaks"]),
     ]
 
     // MARK: - Media (on-demand engines)

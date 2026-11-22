@@ -156,6 +156,12 @@ enum ToolViewRegistry {
         case "pdf.images": ImagesPDFView(tool: tool)
         case "files.batch-rename": BatchRenameView(tool: tool)
         case "files.duplicates": FindDuplicatesView(tool: tool)
+        case "mac.keep-awake": KeepAwakeView(tool: tool)
+        case "mac.battery": BatteryHealthView(tool: tool)
+        case "mac.network-speed": NetworkSpeedTestView(tool: tool)
+        case "mac.eject": EjectDisksView(tool: tool)
+        case "mac.quarantine": QuarantineHelperView(tool: tool)
+        case "mac.hidden-settings": HiddenSettingsView(tool: tool)
         default:
             ContentUnavailableView(
                 tool.localizedTitle,

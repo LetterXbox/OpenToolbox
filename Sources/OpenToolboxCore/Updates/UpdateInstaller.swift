@@ -177,7 +177,9 @@ public struct UpdateInstaller: Sendable {
         }
         guard renamex_np(swapping.path, installed.url.path, UInt32(RENAME_SWAP)) == 0 else {
             let reason = String(cString: strerror(errno))
-            _ = renamex_np(swapping.path, staged.path, UInt32(RENAME_EXCL))
+            guard renamex_np(swapping.path, staged.path, UInt32(RENAME_EXCL)) == 0 else {
+                throw UpdateError.installFailed(Self.updateLeftNote(reason, at: swapping))
+            }
             throw UpdateError.installFailed(reason)
         }
         let displaced = InstalledApp(url: swapping, identity: installed.identity, contents: installed.contents)
@@ -299,10 +301,11 @@ public struct UpdateInstaller: Sendable {
         return dictionary[kSecCodeInfoUnique as String] as? Data
     }
 
-    private static var replacedError: UpdateError {
-        .installFailed(coreLocalized(
-            "OpenToolbox was moved, replaced or changed after it was opened. Quit and reopen it, then try again."))
+    private static var replacedMessage: String {
+        coreLocalized("OpenToolbox was moved, replaced or changed after it was opened. Quit and reopen it, then try again.")
     }
+
+    private static var replacedError: UpdateError { .installFailed(replacedMessage) }
 
     private static func isUnchanged(_ app: InstalledApp) -> Bool {
         fileIdentity(at: app.url) == app.identity && contents(of: app.url) == app.contents
@@ -315,8 +318,14 @@ public struct UpdateInstaller: Sendable {
             return .installFailed(coreLocalized(
                 "Another app was found in place of OpenToolbox during the update. It was kept at \(displaced.path)."))
         }
-        _ = renamex_np(displaced.path, staged.path, UInt32(RENAME_EXCL))
+        guard renamex_np(displaced.path, staged.path, UInt32(RENAME_EXCL)) == 0 else {
+            return .installFailed(updateLeftNote(replacedMessage, at: displaced))
+        }
         return replacedError
+    }
+
+    private static func updateLeftNote(_ reason: String, at location: URL) -> String {
+        coreLocalized("\(reason) The downloaded update was left at \(location.path).")
     }
 
     private func isVerifiedCopy(_ prepared: PreparedUpdate) -> Bool {

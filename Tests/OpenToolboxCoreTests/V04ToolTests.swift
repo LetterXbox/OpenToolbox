@@ -352,19 +352,20 @@ struct V04ToolTests {
                 ytDlp: URL(fileURLWithPath: "/usr/bin/true"),
                 ffmpeg: URL(fileURLWithPath: "/usr/local/bin/ffmpeg"),
                 output: output,
-                tool: "media.download"
-            ) { _, args, onLine in
-                let pIdx = try #require(args.firstIndex(of: "-P"))
-                let staging = URL(fileURLWithPath: args[pIdx + 1])
-                let media = staging.appending(path: "Sample_Video.mp4")
-                try Data("mp4data".utf8).write(to: media)
-                try FileManager.default.createSymbolicLink(
-                    at: staging.appending(path: "evil.mp4"),
-                    withDestinationURL: media
-                )
-                onLine?("PROGRESS 100%")
-                return EngineProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
-            }
+                tool: "media.download",
+                runner: { _, args, onLine in
+                    let pIdx = try #require(args.firstIndex(of: "-P"))
+                    let staging = URL(fileURLWithPath: args[pIdx + 1])
+                    let media = staging.appending(path: "Sample_Video.mp4")
+                    try Data("mp4data".utf8).write(to: media)
+                    try FileManager.default.createSymbolicLink(
+                        at: staging.appending(path: "evil.mp4"),
+                        withDestinationURL: media
+                    )
+                    onLine?("PROGRESS 100%")
+                    return EngineProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+                }
+            )
             #expect(saved.count == 1)
             #expect(saved[0].lastPathComponent == "Sample_Video.mp4")
         }

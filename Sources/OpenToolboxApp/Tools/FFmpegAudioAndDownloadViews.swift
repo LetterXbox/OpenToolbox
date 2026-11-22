@@ -36,6 +36,7 @@ struct MediaInfoView: View {
     @State private var isLoading = false
     @State private var failure: String?
     @State private var probeTask: Task<Void, Never>?
+    @State private var probeGeneration = 0
 
     var body: some View {
         ToolPage(tool: tool) {
@@ -130,11 +131,18 @@ struct MediaInfoView: View {
             }
         }
         .onChange(of: files) { inspect() }
-        .onDisappear { probeTask?.cancel() }
+        .onDisappear {
+            probeGeneration += 1
+            probeTask?.cancel()
+            probeTask = nil
+            isLoading = false
+        }
         .reportsActivity(isLoading)
     }
 
     private func inspect() {
+        probeGeneration += 1
+        let generation = probeGeneration
         probeTask?.cancel()
         probeTask = nil
         info = nil
@@ -149,13 +157,13 @@ struct MediaInfoView: View {
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             do {
                 let probed = try await FFmpegTools.probe(url, ffprobe: ffprobe)
-                guard !Task.isCancelled, self.files.first == url else { return }
+                guard !Task.isCancelled, self.probeGeneration == generation else { return }
                 info = probed
                 isLoading = false
             } catch is CancellationError {
-                if self.files.first == url { isLoading = false }
+                if self.probeGeneration == generation { isLoading = false }
             } catch {
-                guard !Task.isCancelled, self.files.first == url else { return }
+                guard !Task.isCancelled, self.probeGeneration == generation else { return }
                 failure = error.localizedDescription
                 isLoading = false
             }

@@ -420,6 +420,7 @@ struct TrimVideoView: View {
     @State private var failure: String?
     @State private var task: Task<Void, Never>?
     @State private var probeTask: Task<Void, Never>?
+    @State private var probeGeneration = 0
 
     var body: some View {
         ToolPage(tool: tool) {
@@ -448,13 +449,17 @@ struct TrimVideoView: View {
         }
         .onChange(of: files) { loadDuration() }
         .onDisappear {
+            probeGeneration += 1
             task?.cancel()
             probeTask?.cancel()
+            probeTask = nil
         }
         .reportsActivity(isWorking)
     }
 
     private func loadDuration() {
+        probeGeneration += 1
+        let generation = probeGeneration
         probeTask?.cancel()
         probeTask = nil
         duration = nil
@@ -466,7 +471,7 @@ struct TrimVideoView: View {
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             if let info = try? await FFmpegTools.probe(url, ffprobe: ffprobe),
                !Task.isCancelled,
-               self.files.first == url,
+               self.probeGeneration == generation,
                let length = info.durationSeconds
             {
                 duration = length

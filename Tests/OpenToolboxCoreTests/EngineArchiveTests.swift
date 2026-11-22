@@ -217,7 +217,8 @@ struct EngineArchiveTests {
         let task = Task {
             try await EngineProcess.run(
                 URL(fileURLWithPath: "/bin/sh"),
-                arguments: ["-c", "sleep 30 & echo $!; wait"],
+                arguments: ["-c", "(trap '' TERM; sleep 30) & echo $!; wait"],
+                killGraceDelay: .milliseconds(250),
                 onStdoutLine: { pidBox.append($0) }
             )
         }
@@ -238,9 +239,19 @@ struct EngineArchiveTests {
         #expect(kill(spawnedPID, 0) != 0)
     }
 
+    @Test func engineProcessIgnoresBrokenStdinPipe() async throws {
+        let largeInput = Data(repeating: 0x41, count: 256 * 1_024)
+        let result = try await EngineProcess.run(
+            URL(fileURLWithPath: "/usr/bin/true"),
+            arguments: [],
+            standardInput: largeInput
+        )
+        #expect(result.exitCode == 0)
+    }
+
     @Test func tarXzRejectsMalformedPAXLengthWithoutTrapping() async throws {
         try await withTemporaryDirectory { directory in
-            let paxData = Data("9223372036854775807 path=x\n".utf8)
+            let paxData = Data("11 path=ok\n9223372036854775807 path=x\n".utf8)
             let tar = Self.makeTar(entries: [
                 (name: "pax", typeFlag: UInt8(ascii: "x"), data: paxData),
                 (name: "7zz", typeFlag: UInt8(ascii: "0"), data: Data("bin".utf8)),

@@ -55,6 +55,30 @@ public enum EngineProcess {
         onStdoutLine: (@Sendable (String) -> Void)? = nil,
         onStderrLine: (@Sendable (String) -> Void)? = nil
     ) async throws -> EngineProcessResult {
+        try await run(
+            executable,
+            arguments: arguments,
+            environment: environment,
+            currentDirectory: currentDirectory,
+            standardInput: standardInput,
+            maxOutputBytes: maxOutputBytes,
+            killGraceDelay: .seconds(2),
+            onStdoutLine: onStdoutLine,
+            onStderrLine: onStderrLine
+        )
+    }
+
+    static func run(
+        _ executable: URL,
+        arguments: [String],
+        environment: [String: String]? = nil,
+        currentDirectory: URL? = nil,
+        standardInput: Data? = nil,
+        maxOutputBytes: Int = defaultMaxOutputBytes,
+        killGraceDelay: DispatchTimeInterval,
+        onStdoutLine: (@Sendable (String) -> Void)? = nil,
+        onStderrLine: (@Sendable (String) -> Void)? = nil
+    ) async throws -> EngineProcessResult {
         try Task.checkCancellation()
 
         var stdoutFDs: [Int32] = [-1, -1]
@@ -167,10 +191,13 @@ public enum EngineProcess {
             )
         }
 
-        let box = ProcessGroupBox(pid: childPID)
+        let box = ProcessGroupBox(pid: childPID, killGraceDelay: killGraceDelay)
         let stdoutHandle = FileHandle(fileDescriptor: stdoutFDs[0], closeOnDealloc: true)
         let stderrHandle = FileHandle(fileDescriptor: stderrFDs[0], closeOnDealloc: true)
         let stdinWriteFD = stdinFDs[1]
+        if standardInput != nil {
+            _ = fcntl(stdinWriteFD, F_SETNOSIGPIPE, 1)
+        }
 
         return try await withTaskCancellationHandler {
             if let standardInput {
@@ -178,8 +205,9 @@ public enum EngineProcess {
             }
             async let stdoutData = readStream(stdoutHandle, maxBytes: maxOutputBytes, onLine: onStdoutLine)
             async let stderrData = readStream(stderrHandle, maxBytes: maxOutputBytes, onLine: onStderrLine)
-            let exitCode = await waitForExit(pid: childPID, box: box)
+            let exitCode = await waitForExit(pid: childPID)
             let (out, err) = await (stdoutData, stderrData)
+            box.markFinished()
             try Task.checkCancellation()
             return EngineProcessResult(exitCode: exitCode, stdout: out, stderr: err)
         } onCancel: {
@@ -207,7 +235,7 @@ public enum EngineProcess {
         }
     }
 
-    private static func waitForExit(pid: pid_t, box: ProcessGroupBox) async -> Int32 {
+    private static func waitForExit(pid: pid_t) async -> Int32 {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 var status: Int32 = 0
@@ -215,11 +243,9 @@ public enum EngineProcess {
                     let result = waitpid(pid, &status, 0)
                     if result == pid { break }
                     if result < 0 && errno == EINTR { continue }
-                    box.markExited()
                     continuation.resume(returning: -1)
                     return
                 }
-                box.markExited()
                 if (status & 0x7f) == 0 {
                     continuation.resume(returning: (status >> 8) & 0xff)
                 } else {
@@ -270,22 +296,24 @@ public enum EngineProcess {
     private final class ProcessGroupBox: @unchecked Sendable {
         private let lock = NSLock()
         private let pid: pid_t
-        private var exited = false
+        private let killGraceDelay: DispatchTimeInterval
+        private var finished = false
 
-        init(pid: pid_t) {
+        init(pid: pid_t, killGraceDelay: DispatchTimeInterval) {
             self.pid = pid
+            self.killGraceDelay = killGraceDelay
         }
 
-        func markExited() {
-            lock.withLock { exited = true }
+        func markFinished() {
+            lock.withLock { finished = true }
         }
 
         func cancel() {
-            let shouldKill: Bool = lock.withLock { !exited }
+            let shouldKill: Bool = lock.withLock { !finished }
             guard shouldKill, pid > 0 else { return }
             _ = kill(-pid, SIGTERM)
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + .seconds(2)) { [self] in
-                let stillRunning: Bool = lock.withLock { !exited }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + killGraceDelay) { [self] in
+                let stillRunning: Bool = lock.withLock { !finished }
                 if stillRunning {
                     _ = kill(-pid, SIGKILL)
                 }

@@ -32,10 +32,10 @@ public enum DocumentTargetFormat: String, CaseIterable, Sendable, Identifiable {
 
     public var displayName: String {
         switch self {
-        case .pdf: "PDF"
+        case .pdf: coreLocalized("PDF")
         case .docx: coreLocalized("Word (.docx)")
         case .rtf: coreLocalized("Rich Text (.rtf)")
-        case .html: "HTML (.html)"
+        case .html: coreLocalized("HTML (.html)")
         case .odt: coreLocalized("OpenDocument (.odt)")
         case .txt: coreLocalized("Plain Text (.txt)")
         case .md: coreLocalized("Markdown (.md, plain text from rich documents)")

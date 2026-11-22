@@ -116,24 +116,26 @@ public struct JSONParser {
             var value: JSONValue
             switch bytes[index] {
             case UInt8(ascii: "{"):
+                // Empty containers count toward the depth limit too.
+                guard stack.count < Self.maximumDepth else { throw error(.nestingTooDeep) }
                 index += 1
                 skipWhitespace()
                 if peek() == UInt8(ascii: "}") {
                     index += 1
                     value = .object([])
                 } else {
-                    guard stack.count < Self.maximumDepth else { throw error(.nestingTooDeep) }
                     stack.append(.object([], key: try parseObjectKey()))
                     continue
                 }
             case UInt8(ascii: "["):
+                // Empty containers count toward the depth limit too.
+                guard stack.count < Self.maximumDepth else { throw error(.nestingTooDeep) }
                 index += 1
                 skipWhitespace()
                 if peek() == UInt8(ascii: "]") {
                     index += 1
                     value = .array([])
                 } else {
-                    guard stack.count < Self.maximumDepth else { throw error(.nestingTooDeep) }
                     stack.append(.array([]))
                     continue
                 }

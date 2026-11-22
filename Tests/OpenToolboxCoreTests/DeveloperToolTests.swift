@@ -83,6 +83,8 @@ struct JSONTests {
         let depth = JSONParser.maximumDepth
         let arrays = String(repeating: "[", count: depth) + "1" + String(repeating: "]", count: depth)
         #expect(try JSONFormatter.minified(arrays) == arrays)
+        let emptyInnermost = String(repeating: "[", count: depth) + String(repeating: "]", count: depth)
+        #expect(try JSONFormatter.minified(emptyInnermost) == emptyInnermost)
         let pretty = try JSONFormatter.prettyPrinted(arrays)
         #expect(try JSONFormatter.minified(pretty) == arrays)
 

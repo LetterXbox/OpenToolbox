@@ -256,6 +256,8 @@ struct BlurFacesView: View {
     @State private var isPreviewing = false
     /// Bumped whenever the preview's inputs change, so late results can be recognized.
     @State private var previewGeneration = 0
+    /// The preview currently decoding and rendering, if any.
+    @State private var previewJob: Task<Result<(ImageBox, Int), any Error>, Never>?
     @State private var results: [FileResult] = []
 
     var body: some View {
@@ -321,8 +323,12 @@ struct BlurFacesView: View {
         clearPreview()
         let generation = previewGeneration
         isPreviewing = true
+        let previous = previewJob
         Task {
-            let outcome = await Task.detached(priority: .userInitiated) { () -> Result<(ImageBox, Int), any Error> in
+            // One full-size preview at a time: wait for an older one, then run only if still the latest.
+            if let previous { _ = await previous.value }
+            guard generation == previewGeneration else { return }
+            let job = Task.detached(priority: .userInitiated) { () -> Result<(ImageBox, Int), any Error> in
                 Result {
                     let accessing = url.startAccessingSecurityScopedResource()
                     defer { if accessing { url.stopAccessingSecurityScopedResource() } }
@@ -331,7 +337,10 @@ struct BlurFacesView: View {
                     let output = try FaceBlur.anonymize(image, regions: faces, style: style, strength: strength)
                     return (ImageBox(cgImage: output), faces.count)
                 }
-            }.value
+            }
+            previewJob = job
+            let outcome = await job.value
+            if previewJob == job { previewJob = nil }
             // A newer preview or a change of input superseded this one: leave its state alone.
             guard generation == previewGeneration else { return }
             switch outcome {

@@ -129,8 +129,10 @@ struct PDFOrganizeView: View {
     nonisolated static func perform(
         _ mode: Mode, files: [URL], range: String, pagesPerFile: Int, degrees: Int, output: OutputDirectory, tool: ToolID
     ) throws -> [URL] {
+        // One run, one dated folder, even if the batch crosses midnight.
+        let runDate = Date()
         func save(_ document: PDFDocument, _ name: String) throws -> URL {
-            try output.writeNewFile(for: tool, preferredName: name + ".pdf") {
+            try output.writeNewFile(for: tool, preferredName: name + ".pdf", date: runDate) {
                 try PDFTools.write(document, to: $0)
             }
         }
@@ -260,6 +262,8 @@ struct ImagesPDFView: View {
         let mode = self.mode, images = self.images, pdfs = self.pdfs, pageSize = self.pageSize
         let format = self.format, dpi = self.dpi, range = self.pageRange
         let output = model.outputDirectory, toolID = tool.id
+        // One run, one dated folder, even if the batch crosses midnight.
+        let runDate = Date()
         isProcessing = true
         Task {
             results = await Task.detached(priority: .userInitiated) { () -> [FileResult] in
@@ -273,7 +277,7 @@ struct ImagesPDFView: View {
                     case .imagesToPDF:
                         let cgImages = try images.map { try ImageProcessor.loadImage(at: $0).image }
                         let document = PDFTools.makePDF(fromImages: cgImages, pageSize: pageSize)
-                        let url = try output.writeNewFile(for: toolID, preferredName: base + ".pdf") {
+                        let url = try output.writeNewFile(for: toolID, preferredName: base + ".pdf", date: runDate) {
                             try PDFTools.write(document, to: $0)
                         }
                         return [FileResult(source: first, output: url, error: nil)]
@@ -284,7 +288,8 @@ struct ImagesPDFView: View {
                             guard let page = document.page(at: index) else { return nil }
                             let image = try PDFTools.render(page, dpi: CGFloat(dpi))
                             let url = try output.writeNewFile(
-                                for: toolID, preferredName: "\(base) page \(index + 1).\(format.fileExtension)"
+                                for: toolID, preferredName: "\(base) page \(index + 1).\(format.fileExtension)",
+                                date: runDate
                             ) {
                                 try ImageProcessor.write(image, to: $0, format: format, quality: 0.9)
                             }

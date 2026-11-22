@@ -19,7 +19,11 @@ An open-source, pure native macOS (Swift / SwiftUI) utility suite designed aroun
 - [x] Built-in Image & PDF tools via Apple frameworks (Convert/Resize/Rotate, Strip EXIF, Remove Background, Blur Faces, Merge/Split/Extract/Rotate PDF pages, Images ↔ PDF, OCR)
 - [ ] Visual PDF page organizer (drag to reorder, delete pages)
 - [x] Core Mac utilities (Keep Awake, Battery Health, Network Speed Test, Eject All Disks, Quarantine Helper, Hidden Settings)
-- [ ] Signed, notarized `.app` bundle and release build
+- [ ] Signed, notarized `.app` bundle and release build (includes the Xcode application target)
+
+### v0.1.1 — Known v0.1 limitations to close
+- [ ] Find Duplicates → Move to Trash: report "uncertain" instead of auto-recovering when the trashed item cannot be proven to be the reviewed file (two coincident races; see `docs/reviews/resolver-trash-recovery.md`)
+- [ ] PDF exports: pin the calendar as well as the date per run, so a time-zone change mid-export cannot split outputs across two dated folders
 
 ### Phase 2 — On-Demand Media & Archive Engines
 - [ ] `ffmpeg` engine — manifest schema and Engine Manager UI ready; verified builds not pinned yet (Video/Audio Compress, Convert, Trim, Mute, Extract Audio, Video to GIF, Media Info)

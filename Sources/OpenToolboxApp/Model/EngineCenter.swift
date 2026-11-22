@@ -34,10 +34,15 @@ final class EngineCenter {
         progress[id] != nil
     }
 
-    /// Engines a tool needs that are not installed yet.
+    func executableURL(for id: EngineID) -> URL? {
+        store?.executableURL(for: id)
+    }
+
+    /// Engines a tool needs that are not ready at the pinned build yet.
     func missingEngines(for tool: ToolDescriptor) -> [EngineManifest] {
         tool.requiredEngines.compactMap { id in
-            status(of: id).isInstalled ? nil : manifests.first { $0.id == id }
+            if case .installed = status(of: id) { return nil }
+            return manifests.first { $0.id == id }
         }
     }
 

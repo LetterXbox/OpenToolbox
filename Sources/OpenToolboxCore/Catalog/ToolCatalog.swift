@@ -245,23 +245,19 @@ public enum ToolCatalog {
         ToolDescriptor(
             id: "media.record-screen", category: .media,
             title: "Record Screen", summary: "Record the whole screen, a window, or an app.",
-            symbolName: "record.circle", keywords: ["record", "screen", "recording", "capture", "video"],
-            availability: .planned),
+            symbolName: "record.circle", keywords: ["record", "screen", "recording", "capture", "video"]),
         ToolDescriptor(
             id: "media.record-audio", category: .media,
             title: "Record Audio", summary: "Record sound from a microphone.",
-            symbolName: "mic", keywords: ["record", "audio", "microphone", "voice", "memo"],
-            availability: .planned),
+            symbolName: "mic", keywords: ["record", "audio", "microphone", "voice", "memo"]),
         ToolDescriptor(
             id: "media.trim-audio", category: .media,
             title: "Trim Audio", summary: "Cut the start and end off an audio file.",
-            symbolName: "scissors", keywords: ["trim", "cut", "audio", "clip"],
-            availability: .planned),
+            symbolName: "scissors", keywords: ["trim", "cut", "audio", "clip"]),
         ToolDescriptor(
             id: "media.frames", category: .media,
             title: "Extract Frames", summary: "Save frames from a video as images.",
-            symbolName: "photo.stack", keywords: ["frames", "video", "stills", "thumbnails", "images"],
-            availability: .planned),
+            symbolName: "photo.stack", keywords: ["frames", "video", "stills", "thumbnails", "images"]),
         ToolDescriptor(
             id: "media.convert", category: .media,
             title: "Convert Video & Audio", summary: "Convert, compress, and trim media files.",

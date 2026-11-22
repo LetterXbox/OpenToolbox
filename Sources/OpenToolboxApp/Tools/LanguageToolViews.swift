@@ -1,7 +1,7 @@
 import AVFoundation
 import OpenToolboxCore
 import SwiftUI
-import Translation
+@preconcurrency import Translation
 import UniformTypeIdentifiers
 
 /// A text area with a heading and an optional trailing control.

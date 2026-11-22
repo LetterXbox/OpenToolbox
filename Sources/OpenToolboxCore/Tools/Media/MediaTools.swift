@@ -28,7 +28,7 @@ public enum MediaTime {
         var total = 0.0
         for (index, part) in parts.enumerated() {
             guard let value = Double(part), value >= 0, value.isFinite else { return nil }
-            if index > 0, index == parts.count - 1 || parts.count == 3, value >= 60 { return nil }
+            if index > 0, value >= 60 { return nil }
             if index < parts.count - 1, value.rounded() != value { return nil }
             total = total * 60 + value
         }
@@ -42,7 +42,8 @@ public enum MediaTime {
         let minutes = (hundredths / 6_000) % 60
         let secs = (hundredths / 100) % 60
         let fraction = hundredths % 100
-        let tail = fraction == 0 ? "" : String(format: fraction % 10 == 0 ? ".%01d" : ".%02d", fraction % 10 == 0 ? fraction / 10 : fraction)
+        let tail =
+            if fraction == 0 { "" } else if fraction % 10 == 0 { ".\(fraction / 10)" } else { String(format: ".%02d", fraction) }
         if hours > 0 { return String(format: "%d:%02d:%02d", hours, minutes, secs) + tail }
         return String(format: "%d:%02d", minutes, secs) + tail
     }

@@ -1,0 +1,12 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "OpenToolbox" : {
+      "extractionState" : "manual"
+    },
+    "Quick Open…" : {
+      "extractionState" : "manual"
+    }
+  },
+  "version" : "1.0"
+}

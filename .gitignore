@@ -22,3 +22,6 @@ outputs/
 # Environment / local secrets
 .env
 .env.*
+
+# Local agent worktrees
+.claude/worktrees/

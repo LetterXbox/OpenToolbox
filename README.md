@@ -30,6 +30,32 @@ An open-source, pure native macOS (Swift / SwiftUI) utility suite designed aroun
 - [ ] Local transcription (`whisper.cpp`), audio cleanup, and optional CLI / MCP integration
 - [ ] System utilities (Clipboard History, Storage Explorer, App Uninstaller, Display Control, Mouse Fixes)
 
+## Building
+
+Requires macOS 15+ and Xcode 16 or later (Swift 6 toolchain).
+
+```sh
+swift build                 # build the core library and the app
+swift test                  # run OpenToolboxCore unit tests (Swift Testing)
+swift run OpenToolbox       # launch the app from the command line
+```
+
+You can also open `Package.swift` in Xcode and run the `OpenToolbox` scheme.
+
+### Layout
+
+| Path | Contents |
+| --- | --- |
+| `Sources/OpenToolboxCore` | UI-free logic: tool catalog, engine manager (`EngineStore`), output-folder helper, and tool implementations. Fully unit-tested. |
+| `Sources/OpenToolboxApp` | SwiftUI shell: sidebar, `⌘K` command palette, tool catalog, Engine Manager, and tool views. |
+| `Tests/OpenToolboxCoreTests` | Unit tests. They never use the network or the real Application Support folder. |
+
+### Conventions
+
+- **Strings:** every user-facing literal goes through `L("…")` (app) or `coreLocalized("…")` (core) so it lands in the `Localizable.xcstrings` catalogs. English is the source language.
+- **Engines:** manifests ship with the app (`EngineCatalog`). Each artifact is pinned per CPU architecture with an HTTPS URL, byte size, and SHA-256. Installs download to a staging folder, verify size and checksum, then move into `~/Library/Application Support/OpenToolbox/engines/<id>/` in one rename. Engines that have no verified pinned build yet are listed as "Coming soon" and cannot be installed.
+- **Outputs:** file tools write to `<output folder>/<yyyy-MM-dd>/<tool>/` with collision-safe names, and never overwrite the source file.
+
 ## Inspiration & Credits
 
 Inspired by all-in-one native macOS utility suites such as [Toolbox for Mac](https://mactoolbox.app/) and [DevToys](https://devtoys.app/). OpenToolbox is built independently from scratch as a free, open-source, modular alternative.

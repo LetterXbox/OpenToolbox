@@ -355,7 +355,7 @@ public final class EngineStore: Sendable {
         do {
             let directory = try root.directory(id)
             try directory.requireOwner()
-            guard try directory.isSameDirectory(as: info), info.st_dev == root.metadata().st_dev else {
+            guard try directory.isSameDirectory(as: info), try info.st_dev == root.metadata().st_dev else {
                 throw POSIXError(.EPERM)
             }
             let handle = try directory.regularFile("receipt.json")

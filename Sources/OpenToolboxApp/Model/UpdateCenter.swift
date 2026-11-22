@@ -252,6 +252,7 @@ final class UpdateCenter {
 
     private func recheck(userInitiated: Bool) {
         phase = .idle
+        guard userInitiated || checksAutomatically else { return }
         checkNow(userInitiated: userInitiated)
     }
 

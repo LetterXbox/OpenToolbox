@@ -40,10 +40,13 @@ struct SoftwareUpdateView: View {
             ProgressView().controlSize(.small)
         case .upToDate(let latest):
             Text(L("OpenToolbox is up to date.")).font(.headline)
-            Text(latest.isPrerelease
-                ? L("You have version \(latest.description). No newer version is available.")
-                : L("Version \(latest.description) is the latest release."))
-                .foregroundStyle(.secondary)
+            if latest.isPrerelease {
+                currentVersionText
+                Text(L("No newer version is available.")).foregroundStyle(.secondary)
+            } else {
+                Text(L("Version \(latest.description) is the latest release."))
+                    .foregroundStyle(.secondary)
+            }
             buttons { Button(L("OK")) { dismissWindow(id: SoftwareUpdateWindow.id) }.keyboardShortcut(.defaultAction) }
         case .available(let update):
             Text(L("OpenToolbox \(update.version.description) is available.")).font(.headline)

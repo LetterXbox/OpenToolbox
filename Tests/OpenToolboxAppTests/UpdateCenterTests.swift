@@ -66,6 +66,7 @@ struct UpdateCenterTests {
             try await waitUntil { !fixture.installer.discarded.isEmpty }
             try await waitUntil { center.phase == .idle }
             #expect(fixture.installer.discarded == [fixture.stagedApp])
+            #expect(fixture.installer.resumedCancelled == true)
             center.installOnQuit()
             #expect(fixture.installer.installed.isEmpty)
         }
@@ -99,6 +100,24 @@ struct UpdateCenterTests {
             fixture.checks.releaseFirst()
             try await waitUntil { center.phase == .available(update) }
             #expect(fixture.checks.requests == [false, true])
+        }
+    }
+
+    @Test func noRecheckAfterAutomaticChecksAreTurnedOff() async throws {
+        try await withFixture(version: "0.2.0", testBuilds: true) { fixture in
+            fixture.checks.results = [.available(fixture.update("0.3.0-rc.1")), .available(fixture.update("0.3.0"))]
+            fixture.checks.holdsFirst = true
+            let center = fixture.center()
+            center.checksAutomatically = true
+            try await waitUntil { fixture.checks.requests.count == 1 }
+
+            center.checksAutomatically = false
+            center.receivesTestBuilds = false
+            fixture.checks.releaseFirst()
+            try await waitUntil { center.phase == .idle }
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(fixture.checks.requests == [true])
+            #expect(center.phase == .idle)
         }
     }
 }
@@ -188,6 +207,7 @@ final class StubInstaller: UpdateInstalling, @unchecked Sendable {
     private var _discarded: [URL] = []
     private var _installed: [URL] = []
     private var _prepareStarted = false
+    private var _resumedCancelled: Bool?
     private var held: CheckedContinuation<Void, Never>?
     private var released = false
     var holdsPrepare = false
@@ -199,6 +219,7 @@ final class StubInstaller: UpdateInstalling, @unchecked Sendable {
     var discarded: [URL] { lock.withLock { _discarded } }
     var installed: [URL] { lock.withLock { _installed } }
     var prepareStarted: Bool { lock.withLock { _prepareStarted } }
+    var resumedCancelled: Bool? { lock.withLock { _resumedCancelled } }
 
     func releasePrepare() {
         let pending = lock.withLock {
@@ -226,6 +247,8 @@ final class StubInstaller: UpdateInstalling, @unchecked Sendable {
                 }
                 if resumeNow { continuation.resume() }
             }
+            let cancelled = Task.isCancelled
+            lock.withLock { _resumedCancelled = cancelled }
         }
         return PreparedUpdate(
             version: update.version, stagedApp: stagedApp, installed: installed, codeHash: Data(),

@@ -104,6 +104,7 @@ struct BatchRenameView: View {
         } message: {
             Text(L("This changes the names of the original files in their current folders."))
         }
+        .reportsActivity(session.isRenaming)
     }
 
     private var filePreview: some View {
@@ -508,6 +509,7 @@ struct FindDuplicatesView: View {
         .onChange(of: includeHidden) { clearScan() }
         .onChange(of: minimumSize) { clearScan() }
         .onDisappear { scanTask?.cancel() }
+        .reportsActivity(scanTask != nil)
     }
 
     private var folderList: some View {

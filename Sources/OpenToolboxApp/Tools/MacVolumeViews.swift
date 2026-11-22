@@ -80,6 +80,7 @@ struct EjectDisksView: View {
         } message: {
             Text(L("Close files on these volumes before continuing."))
         }
+        .reportsActivity(isEjecting)
     }
 
     private func refresh() {
@@ -197,6 +198,7 @@ struct QuarantineHelperView: View {
             case .failure(let error): importError = error.localizedDescription
             }
         }
+        .reportsActivity(isWorking)
     }
 
     private func fileRow(_ row: FileRow) -> some View {

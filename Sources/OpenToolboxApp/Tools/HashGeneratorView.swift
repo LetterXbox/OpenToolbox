@@ -95,6 +95,7 @@ struct HashGeneratorView: View {
         .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.item]) { result in
             if case .success(let url) = result { hashFile(url) }
         }
+        .reportsActivity(isHashingFile)
     }
 
     private var fileDropZone: some View {

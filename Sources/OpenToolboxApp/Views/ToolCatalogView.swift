@@ -38,6 +38,7 @@ struct ToolCatalogView: View {
 
 private struct ToolCatalogRow: View {
     @Environment(AppModel.self) private var model
+    @Environment(WindowModel.self) private var window
     let tool: ToolDescriptor
 
     var body: some View {
@@ -70,7 +71,7 @@ private struct ToolCatalogRow: View {
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             if tool.availability == .available, model.isEnabled(tool) {
-                model.open(.tool(tool.id))
+                window.open(.tool(tool.id))
             }
         }
     }

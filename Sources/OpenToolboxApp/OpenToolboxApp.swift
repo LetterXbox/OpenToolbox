@@ -5,10 +5,10 @@ import SwiftUI
 @main
 struct OpenToolboxApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var model = AppModel()
 
     var body: some Scene {
-        WindowGroup(L("OpenToolbox")) {
+        let model = appDelegate.model
+        WindowGroup(L("OpenToolbox"), id: MainWindow.id) {
             RootView()
                 .environment(model)
                 .environment(appDelegate.updates)
@@ -19,19 +19,7 @@ struct OpenToolboxApp: App {
                 CheckForUpdatesButton(updates: appDelegate.updates)
             }
             SidebarCommands()
-            CommandMenu(L("Tools")) {
-                Button(L("Quick Open…")) {
-                    model.isCommandPaletteVisible.toggle()
-                }
-                .keyboardShortcut("k", modifiers: .command)
-
-                Divider()
-
-                Button(L("Tool Catalog")) { model.selection = .catalog }
-                    .keyboardShortcut("1", modifiers: [.command, .shift])
-                Button(L("Engines")) { model.selection = .engines }
-                    .keyboardShortcut("2", modifiers: [.command, .shift])
-            }
+            ToolsCommands(model: model)
         }
 
         Window(L("Software Update"), id: SoftwareUpdateWindow.id) {
@@ -46,11 +34,52 @@ struct OpenToolboxApp: App {
                 .environment(model)
                 .environment(appDelegate.updates)
         }
+
+        MenuBarExtra(
+            isInserted: Binding(get: { model.showsMenuBarExtra }, set: { model.showsMenuBarExtra = $0 })
+        ) {
+            MenuBarMenu()
+                .environment(model)
+                .environment(appDelegate.updates)
+        } label: {
+            Image(systemName: "wrench.and.screwdriver")
+                .accessibilityLabel(L("OpenToolbox"))
+        }
+    }
+}
+
+enum MainWindow {
+    static let id = "main"
+}
+
+struct ToolsCommands: Commands {
+    let model: AppModel
+    @FocusedValue(\.windowModel) private var window
+
+    var body: some Commands {
+        CommandMenu(L("Tools")) {
+            Button(L("Quick Open…")) {
+                if let window {
+                    window.isCommandPaletteVisible.toggle()
+                } else {
+                    model.showQuickOpen()
+                }
+            }
+            .keyboardShortcut("k", modifiers: .command)
+
+            Divider()
+
+            Button(L("Tool Catalog")) { model.show(.catalog) }
+                .keyboardShortcut("1", modifiers: [.command, .shift])
+            Button(L("Engines")) { model.show(.engines) }
+                .keyboardShortcut("2", modifiers: [.command, .shift])
+        }
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    let model = AppModel()
     let updates = UpdateCenter()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -58,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // app gets a Dock icon, a menu bar, and keyboard focus.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
+        model.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -65,6 +95,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        !model.showsMenuBarExtra
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag, model.hasOpenWindow {
+            model.showWindow()
+            return false
+        }
+        return true
     }
 }

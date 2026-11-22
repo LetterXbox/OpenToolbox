@@ -93,6 +93,7 @@ struct PDFOrganizeView: View {
             results = []
             if mode != .merge, files.count > 1 { files = Array(files.prefix(1)) }
         }
+        .reportsActivity(isProcessing)
     }
 
     private var actionTitle: String {
@@ -255,6 +256,7 @@ struct ImagesPDFView: View {
             }
             FileResultsView(results: results)
         }
+        .reportsActivity(isProcessing)
     }
 
     private func run() {

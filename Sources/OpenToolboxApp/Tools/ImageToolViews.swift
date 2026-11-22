@@ -103,6 +103,7 @@ struct ImageConvertView: View {
             }
             FileResultsView(results: results)
         }
+        .reportsActivity(isProcessing)
     }
 
     private func run() {
@@ -177,6 +178,7 @@ struct StripMetadataView: View {
                 .foregroundStyle(.secondary)
             FileResultsView(results: results)
         }
+        .reportsActivity(isProcessing)
     }
 
     private func run() {
@@ -221,6 +223,7 @@ struct RemoveBackgroundView: View {
             }
             FileResultsView(results: results)
         }
+        .reportsActivity(isProcessing)
     }
 
     private func run() {
@@ -306,6 +309,7 @@ struct BlurFacesView: View {
         }
         .onChange(of: files) { clearPreview() }
         .onChange(of: strength) { clearPreview() }
+        .reportsActivity(isProcessing)
     }
 
     /// Drops the current preview and orphans any preview still computing.
@@ -403,6 +407,7 @@ struct OCRView: View {
             if let errorText { ErrorMessage(text: errorText) }
             CodeOutput(text: text, placeholder: L("Recognized text appears here. Everything runs on this Mac."))
         }
+        .reportsActivity(isProcessing)
     }
 
     private func run() {

@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/LetterXbox/OpenToolbox/releases/latest"><img src="https://img.shields.io/github/v/release/LetterXbox/OpenToolbox?label=Latest%20Release" alt="Latest Release"></a>
   <img src="https://img.shields.io/badge/macOS-15%2B-blue" alt="macOS 15+">
-  <img src="https://img.shields.io/badge/Apple%20Silicon%20%26%20Intel-Universal-informational" alt="Universal Binary">
+  <img src="https://img.shields.io/badge/Mac-Apple%20Silicon-informational" alt="Apple Silicon">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-green" alt="GPL-3.0 License"></a>
 </p>
 
@@ -21,7 +21,7 @@ OpenToolbox brings 51 everyday utilities together in a single Swift and SwiftUI 
 
 ## Why OpenToolbox
 
-- **Pure native macOS (macOS 15+):** Built with Swift, SwiftUI, and Apple frameworks (Vision, PDFKit, ImageIO, AVFoundation, ScreenCaptureKit, Speech, Translation, and Foundation Models)—no Electron, no web wrappers, and universal binaries for Apple silicon and Intel.
+- **Pure native macOS (macOS 15+):** Built with Swift, SwiftUI, and Apple frameworks (Vision, PDFKit, ImageIO, AVFoundation, ScreenCaptureKit, Speech, Translation, and Foundation Models)—no Electron and no web wrappers, supporting Macs with Apple silicon running macOS 15 or later.
 - **Private and offline by default:** No accounts, no telemetry, and no file uploads. All processing—including **Translate**, **Transcribe**, and **Summarize**—happens on your Mac. OpenToolbox connects to the network only when you explicitly start an online action: downloading on-demand engines, running **Network Speed Test**, checking for or downloading updates, loading a URL in **Web Page to PDF**, showing or searching the map in **Coordinate Picker** (Apple Maps), or clicking **Find Network Scanners** in **Scan Document**. You can also opt in to daily automatic update checks; a second opt-in lets OpenToolbox download an available update's disk image after a daily check without a further click and install it when you restart or quit (both are off by default). For **Translate** and (on macOS 26+) **Transcribe**, macOS may download an on-device language pack the first time you use a language.
 - **Originals stay untouched:** Tools that export processed copies write new, collision-safe files into `<output folder>/<yyyy-MM-dd>/<tool>/` rather than overwriting your source files. Actions that modify or remove existing files happen only when you explicitly choose them—such as **Batch Rename**'s **Rename in place** mode (which supports undo), **Find Duplicates** moving selected copies to Trash, and **Quarantine Helper** clearing a file's quarantine flag in place.
 - **On-demand external engines:** Built-in tools work out of the box with zero extra downloads. External CLI engines are never bundled; when available, they download only on request, are verified by SHA-256, shared across tools, and removable in one click.
@@ -119,7 +119,7 @@ Powered on-device by Apple's Vision, PDFKit, ImageIO, Image Capture, and WebKit 
 
 ## Install
 
-Requires **macOS 15 or later** (universal build for Apple silicon and Intel).
+Supports Macs with **Apple silicon** running **macOS 15 or later**.
 
 Some tools have additional system or hardware requirements:
 
@@ -150,6 +150,7 @@ Choose **OpenToolbox → Check for Updates…** to check GitHub Releases manuall
 ## Known Limitations
 
 - **Not notarized / ad-hoc signed:** Releases require **Open Anyway** on first launch (see [Install](#install)). Because the signature is ad-hoc, it proves the app bundle is intact rather than publisher identity; trust in an update rests on the GitHub release. After an update, macOS may also ask again for **Screen Recording**, **Microphone**, **Speech Recognition**, and **Location** permissions.
+- **Intel Macs not supported:** Intel Macs are not supported. The release download still contains Intel code, but OpenToolbox is not tested on Intel Macs and issues on Intel Macs will not be fixed.
 - **Unsaved recordings:** If **Record Screen** or **Record Audio** can't save a recording to the output folder, it is kept in **Unsaved Recordings** inside the recorder, where both tools can save or discard it later. If saving to **Unsaved Recordings** also fails, the error shows where the recording is stored; copy it from there before closing the tool.
 - **PDF Password restrictions and removal:** Printing, copying, and editing restrictions are enforced only by PDF apps that respect them. Removing a password or restrictions requires the PDF's owner password (or its single password if one was used for both).
 - **Summarize and Transcribe system limits:** **Summarize** requires macOS 26 or later on a Mac with Apple Intelligence turned on. **Transcribe** uses Apple's newer speech engine on macOS 26 or later and the older on-device speech recognizer on earlier versions; the languages it offers depend on the recognizer your macOS version uses.

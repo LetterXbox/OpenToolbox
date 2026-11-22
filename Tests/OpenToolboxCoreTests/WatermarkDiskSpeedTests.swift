@@ -391,7 +391,7 @@ struct DiskSpeedTests {
                     progress: { log.add($0, $1) })
             }
             #expect(readings.count == 3)
-            #expect(log.all.contains { $0.0 == .writing && $0.1 == 0.5 })
+            #expect(log.all.last.map { $0.0 == .writing && $0.1 == 0.5 } == true)
             #expect(!log.all.contains { $0.0 == .reading })
             let leftovers = try contents(of: directory)
             #expect(leftovers.isEmpty)
@@ -410,7 +410,7 @@ struct DiskSpeedTests {
                     progress: { log.add($0, $1) })
             }
             #expect(readings.count == 3)
-            #expect(log.all.contains { $0.0 == .writing && $0.1 == 0.5 })
+            #expect(log.all.last.map { $0.0 == .writing && $0.1 == 0.5 } == true)
             #expect(!log.all.contains { $0.0 == .reading })
             let leftovers = try contents(of: directory)
             #expect(leftovers.isEmpty)

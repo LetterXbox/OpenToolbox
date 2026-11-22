@@ -113,7 +113,7 @@ final class ScannerList: NSObject, ICDeviceBrowserDelegate {
         browser.delegate = self
         browser.browsedDeviceTypeMask = ICDeviceTypeMask(
             rawValue: ICDeviceTypeMask.scanner.rawValue | ICDeviceLocationTypeMask.local.rawValue
-                | ICDeviceLocationTypeMask.bonjour.rawValue | ICDeviceLocationTypeMask.shared.rawValue)
+                | ICDeviceLocationTypeMask.bonjour.rawValue | ICDeviceLocationTypeMask.shared.rawValue) ?? .scanner
     }
 
     func start() { if !browser.isBrowsing { browser.start() } }

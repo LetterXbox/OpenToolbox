@@ -53,7 +53,7 @@ struct SidebarView: View {
             }
         }
         .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 320)
-        .safeAreaInset(edge: .bottom) {
+        .sidebarBottomBar {
             Button {
                 model.isCommandPaletteVisible = true
             } label: {
@@ -70,6 +70,23 @@ struct SidebarView: View {
             .buttonStyle(.plain)
             .padding(10)
         }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func sidebarBottomBar<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        // safeAreaBar first ships in the macOS 26 SDK (Swift 6.2); Xcode 16 must still build this file.
+        #if compiler(>=6.2)
+        if #available(macOS 26, *) {
+            scrollEdgeEffectStyle(.hard, for: .bottom)
+                .safeAreaBar(edge: .bottom, content: content)
+        } else {
+            safeAreaInset(edge: .bottom, content: content)
+        }
+        #else
+        safeAreaInset(edge: .bottom, content: content)
+        #endif
     }
 }
 

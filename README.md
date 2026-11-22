@@ -22,9 +22,17 @@ An open-source, pure native macOS (Swift / SwiftUI) utility suite designed aroun
 - [ ] Release `.app` bundle built from an Xcode application target. Releases are unsigned for now: on first launch, approve the app in System Settings → Privacy & Security → **Open Anyway**.
 - [ ] Later, optional: Developer ID signing and notarization
 
-### v0.1.1 — Known v0.1 limitations to close
-- [ ] Find Duplicates → Move to Trash: report "uncertain" instead of auto-recovering when the trashed item cannot be proven to be the reviewed file (two coincident races; see `docs/reviews/resolver-trash-recovery.md`)
-- [ ] PDF exports: pin the calendar as well as the date per run, so a time-zone change mid-export cannot split outputs across two dated folders
+### v0.1.1 — Fixes
+- [x] Find Duplicates → Move to Trash: confirm the move without reading `~/.Trash`, which macOS privacy protection blocks (v0.1 reported every move as unverified)
+- [x] Find Duplicates → Move to Trash: report "uncertain" instead of auto-recovering when the trashed item cannot be proven to be the reviewed file (two coincident races; see `docs/reviews/resolver-trash-recovery.md`)
+- [x] PDF exports: pin the calendar as well as the date per run, so a time-zone change mid-export cannot split outputs across two dated folders
+- [x] Packaged app records the SDK it was built with, so macOS 26 and later draw it in the current design instead of a compatibility mode that showed a line across the scrolled sidebar
+
+### v0.2 — App Experience & More Built-In Tools
+- [ ] Tools keep their state when you switch to another tool, so long jobs such as a speed test keep running, with progress and a notification when they finish
+- [ ] Menu bar mode, a global hotkey for Quick Open, and launch at login
+- [ ] Watermark images and PDFs (text or image, position, opacity)
+- [ ] Disk Speed Test (sequential read/write on a chosen volume)
 
 ### Phase 2 — On-Demand Media & Archive Engines
 - [ ] `ffmpeg` engine — manifest schema and Engine Manager UI ready; verified builds not pinned yet (Video/Audio Compress, Convert, Trim, Mute, Extract Audio, Video to GIF, Media Info)
@@ -48,6 +56,8 @@ swift run OpenToolbox       # launch the app from the command line
 ```
 
 You can also open `Package.swift` in Xcode and run the `OpenToolbox` scheme.
+
+To build a universal, ad-hoc signed `OpenToolbox.app` and its release disk image (`.dmg`), run `scripts/package-app.sh <version>` on a Mac. The output goes to `.build/release-app/dist/`.
 
 ### Layout
 

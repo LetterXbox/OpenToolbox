@@ -1,3 +1,4 @@
+import AppKit
 import OpenToolboxCore
 import SwiftUI
 
@@ -61,10 +62,17 @@ struct CommandPaletteView: View {
                             highlighted = max(highlighted - 1, 0)
                             return .handled
                         }
-                        .onKeyPress(.escape) {
-                            close()
-                            return .handled
-                        }
+                    Button(action: close) {
+                        Text(verbatim: "esc")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.cancelAction)
+                    .help(L("Close"))
                 }
                 .padding(14)
 
@@ -104,7 +112,12 @@ struct CommandPaletteView: View {
             .padding(.top, 72)
         }
         .onChange(of: query) { highlighted = 0 }
-        .task { isSearchFocused = true }
+        .task {
+            // A text field in the tool view keeps first responder unless it resigns first.
+            NSApp.keyWindow?.makeFirstResponder(nil)
+            await Task.yield()
+            isSearchFocused = true
+        }
     }
 
     private func row(_ entry: Entry, isHighlighted: Bool) -> some View {

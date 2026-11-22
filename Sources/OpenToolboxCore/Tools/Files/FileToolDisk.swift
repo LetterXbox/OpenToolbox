@@ -174,19 +174,6 @@ enum FileToolDisk {
         }
     }
 
-    static func restore(
-        _ source: URL, from directory: Int32, matching identity: FileIdentity,
-        to target: Int32, at destination: URL
-    ) throws {
-        let name = source.lastPathComponent
-        guard entry(name, in: directory).map(FileIdentity.init) == identity else {
-            throw FileToolError.changed(source)
-        }
-        guard renameatx_np(directory, name, target, destination.lastPathComponent, UInt32(RENAME_EXCL)) == 0 else {
-            throw posixError(at: destination)
-        }
-    }
-
     static func exchange(_ source: String, with target: String, in directory: Int32, at url: URL) throws {
         guard renameatx_np(directory, source, directory, target, UInt32(RENAME_SWAP)) == 0 else {
             throw posixError(at: url)

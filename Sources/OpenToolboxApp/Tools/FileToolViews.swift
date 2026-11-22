@@ -658,8 +658,6 @@ struct FindDuplicatesView: View {
         switch disposition {
         case .trashed(let destination):
             L("Moved to Trash at “\(destination.path)”.")
-        case .restored(let destination, let reason):
-            L("Restored to “\(destination.path)”. \(reason)")
         case .uncertain(let reason):
             reason
         case .skipped(let reason):
@@ -740,7 +738,7 @@ struct FindDuplicatesView: View {
             trashOutcomes = result.outcomes
             for outcome in result.outcomes where !removed.contains(outcome.original) {
                 switch outcome.disposition {
-                case .restored, .uncertain:
+                case .uncertain:
                     filesNeedingRescan.insert(outcome.original)
                 case .trashed, .skipped:
                     break

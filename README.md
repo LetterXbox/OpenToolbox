@@ -8,8 +8,8 @@ OpenToolbox brings common small utilities together in a single Swift and SwiftUI
 
 ## Why OpenToolbox
 
-- **Native macOS (macOS 15+):** Written in Swift and SwiftUI using Apple frameworks (such as Vision, PDFKit, and ImageIO)—no Electron, no web wrappers, and universal builds for Apple silicon and Intel.
-- **Private and offline by default:** No accounts, no telemetry, and no file uploads. Files are processed locally on your Mac. OpenToolbox only accesses the network for actions you explicitly start (downloading on-demand engines, running Network Speed Test, or checking for updates), plus a once-a-day update check if you turn it on.
+- **Native macOS (macOS 15+):** Written in Swift and SwiftUI using Apple frameworks (such as Vision, PDFKit, ImageIO, AVFoundation, ScreenCaptureKit, Speech, and Translation)—no Electron, no web wrappers, and universal builds for Apple silicon and Intel.
+- **Private and offline by default:** No accounts, no telemetry, and no file uploads. Files are processed locally on your Mac. OpenToolbox only accesses the network for actions you explicitly start (downloading on-demand engines, running Network Speed Test, checking for updates, saving a web page with Web Page to PDF, and showing or searching the map in Coordinate Picker), plus a once-a-day update check if you turn it on. Translate and, on macOS 26, Transcribe run on your Mac, but macOS may download a language the first time you use it.
 - **Originals untouched:** File-processing tools write new, collision-safe files into a dedicated output folder (`<output folder>/<yyyy-MM-dd>/<tool>/`) instead of overwriting your source files.
 - **On-demand engines:** Built-in Swift and Apple-framework tools work out of the box with zero extra downloads. External CLI engines are never bundled into the app; when available, they are downloaded only when you choose to install them, verified by SHA-256, shared across tools that need them, and removable with one click.
 
@@ -38,6 +38,8 @@ Navigate tools from the sidebar, jump anywhere with **Quick Open (`⌘K`)**, and
 | **Lorem Ipsum** | Generate placeholder text. |
 | **Password Generator** | Generate strong random passwords. |
 | **CSV ↔ JSON** | Convert between CSV and JSON. |
+| **Color Picker** | Pick a color anywhere on screen and copy it as hex, RGB, HSL, HSB, SwiftUI, or AppKit code. |
+| **Coordinate Picker** | Find a place on a map, or type coordinates, and copy latitude and longitude in several formats. |
 
 ### Text & Files
 
@@ -48,6 +50,10 @@ Navigate tools from the sidebar, jump anywhere with **Quick Open (`⌘K`)**, and
 | **QR Code** | Generate and read QR codes. |
 | **Batch Rename** | Rename many files with patterns and previews. |
 | **Find Duplicates** | Find duplicate files by content. |
+| **Translate** | Translate text on your Mac with Apple Translation. |
+| **Text to Speech** | Read text aloud with any installed voice, or save it as an audio file. |
+| **Transcribe** | Turn speech in audio and video files into text or subtitles (SRT, WebVTT), on your Mac. |
+| **Summarize** | Summarize text and documents with Apple Intelligence, on your Mac (macOS 26 and later on Macs with Apple Intelligence). |
 
 ### Images & PDF
 
@@ -60,9 +66,15 @@ Powered by Apple frameworks (Vision, PDFKit, ImageIO):
 | **Remove Background** | Lift subjects from photos on-device. |
 | **Blur Faces** | Detect and blur faces on-device. |
 | **Extract Text (OCR)** | Recognize text in images and PDFs on-device. |
-| **Organize PDFs** | Merge, split, extract, reorder, and rotate PDF pages. |
+| **Organize PDFs** | Merge, split, extract, delete, reorder, and rotate PDF pages. |
 | **Images ↔ PDF** | Combine images into a PDF or export pages as images. |
 | **Watermark** | Add a text or image watermark to images and PDFs: position, size, opacity, diagonal or tiled. PDF pages stay vector and the text stays searchable. |
+| **Compress Images** | Make images smaller by lowering quality or size. A copy that wouldn't be smaller isn't saved. |
+| **Crop PDF** | Trim the margins of PDF pages. |
+| **PDF Password** | Add a password to PDFs, with optional printing and copying restrictions, or remove one. |
+| **Fill & Flatten Forms** | Fill in PDF forms and save a copy, optionally flattened so the values can't be changed. |
+| **Scan Document** | Scan pages from a scanner, or an iPhone or iPad with Continuity Camera, into a PDF. |
+| **Web Page to PDF** | Save a web page as A4 or Letter pages, or as one long page. |
 
 ### Mac Utilities
 
@@ -75,8 +87,17 @@ Powered by Apple frameworks (Vision, PDFKit, ImageIO):
 | **Eject All Disks** | Eject every external and disk-image volume. |
 | **Quarantine Helper** | Inspect and clear the quarantine flag on downloaded files. |
 | **Hidden Settings** | Toggle documented hidden macOS preferences. |
+| **Wi-Fi Password** | Show a saved Wi-Fi password, after macOS asks for an administrator's password, and share it as a QR code. |
+| **Reset Permissions** | Reset the privacy permissions an app has been given or denied, so it asks again. |
 
 ### Media
+
+| Tool | Description |
+| --- | --- |
+| **Record Screen** | Record a display, a window, or an app, with the Mac's sound and the microphone if you choose. |
+| **Record Audio** | Record from the microphone to an AAC file. |
+| **Trim Audio** | Cut the start and end off an audio file. WAV, AIFF, and CAF stay lossless. |
+| **Extract Frames** | Save frames from videos as images: spread evenly, every few seconds, or at set times. |
 
 - **Convert Video & Audio** (`ffmpeg`) and **Download Video** (`yt-dlp`) are listed in the app as **"Coming soon"** until verified engine builds are pinned.
 
@@ -88,7 +109,7 @@ Requires **macOS 15 or later** (universal build for Apple silicon and Intel).
 2. Drag **OpenToolbox** into the **Applications** folder.
 3. Open **OpenToolbox** from Applications. Because releases are not signed with an Apple Developer ID or notarized, macOS blocks the first launch: click **Done**, then go to **System Settings → Privacy & Security** and click **Open Anyway**. You only need to do this once per version.
 
-Each release lists the disk image's SHA-256 checksum so you can verify your download:
+GitHub shows each download's SHA-256 checksum on the release page, so you can verify it:
 
 ```sh
 shasum -a 256 OpenToolbox-<version>-macOS-universal.dmg
@@ -105,6 +126,10 @@ If installing an update fails when you quit, OpenToolbox tells you why the next 
 ## Known Limitations
 
 - Releases are not notarized (see [Install](#install)).
+- Because releases are ad-hoc signed, macOS may ask again for Screen Recording, Microphone, Speech Recognition and Location permission after an update.
+- Summarize needs macOS 26 or later on a Mac with Apple Intelligence turned on. On older macOS, Transcribe uses the older on-device speech recognizer, which supports fewer languages.
+- Scan Document works with scanners macOS supports through Image Capture, and with an iPhone or iPad through **File → Import from iPhone or iPad**.
+- Web Page to PDF loads the page without your cookies or logins, so pages behind a sign-in save as their sign-in page. Splitting a page into A4 or Letter pages can cut a line of text across two pages.
 - Closing a window stops a Network Speed Test, Disk Speed Test or duplicate scan running in it. File batches already under way, such as converting or watermarking, finish and save their files as long as OpenToolbox keeps running; with the menu bar icon off, closing the last window quits it.
 - Watermark works on single images and PDFs. Images with several frames or pages, such as animated GIFs and multipage TIFFs, are refused.
 - Watermarked PDFs keep each page's text and vector graphics, but links, form fields, comments and the outline are not kept as interactive items.
@@ -116,7 +141,7 @@ If installing an update fails when you quit, OpenToolbox tells you why the next 
 
 ## Building from Source
 
-Requires **macOS 15 or later** and **Xcode 16 or later** (Swift 6 toolchain).
+Requires **macOS 15 or later** and **Xcode 26 or later** (Swift 6 toolchain and the macOS 26 SDK).
 
 ```sh
 swift build                 # build the core library and the app

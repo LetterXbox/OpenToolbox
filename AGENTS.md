@@ -17,11 +17,11 @@ Open-source, pure native macOS (Swift / SwiftUI, macOS 15+) utility suite with o
 - **Pure native Swift / SwiftUI** targeting macOS 15+ (Swift Package Manager).
 - **On-demand downloads only:** Pure-Swift and Apple-framework tools add 0 MB external weight. External engines live in `~/Library/Application Support/OpenToolbox/engines/`, downloaded only when the user enables/downloads a tool requiring them, verified by SHA-256, deduplicated across tools, and individually removable.
 - **Originals untouched:** File tools must write new files to an output directory without silently overwriting originals.
-- **Privacy first:** Offline by default; network access occurs only for explicit user-triggered actions (engine downloads, video URL downloads, network speed tests, update checks) and the opt-in daily update check (off by default).
+- **Privacy first:** Offline by default; network access occurs only for explicit user-triggered actions (engine downloads, video URL downloads, network speed tests, update checks, Web Page to PDF, the Coordinate Picker map, and the language downloads macOS makes for Translate and Transcribe) and the opt-in daily update check (off by default).
 
 ## Building and testing
 
-- The app builds only on macOS with Xcode 16 or later (Swift 6). Use `swift build` and `swift test`; package releases with `scripts/package-app.sh` and follow `docs/RELEASING.md`.
+- The app builds only on macOS with Xcode 26 or later (Swift 6, macOS 26 SDK). APIs newer than macOS 15 stay behind `#available`, and frameworks newer than macOS 15 are weakly linked (`scripts/package-app.sh` checks this). Use `swift build` and `swift test`; package releases with `scripts/package-app.sh` and follow `docs/RELEASING.md`.
 - Unit tests never use the network or the real Application Support folder.
 
 ## Public repository

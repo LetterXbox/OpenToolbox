@@ -92,7 +92,9 @@ shasum -a 256 OpenToolbox-<version>-macOS-universal.dmg
 
 Choose **OpenToolbox → Check for Updates…** to look for a newer release on GitHub. In **Settings → Updates** you can turn on a daily automatic check and, optionally, automatic download and install. Both are off by default.
 
-An update is installed only after the disk image matches the SHA-256 checksum GitHub publishes for it, and the app inside has the OpenToolbox bundle identifier, the release's version number, and a valid code signature. It replaces the app when you restart or quit. If OpenToolbox can't write to its own folder, or macOS is running it from a temporary location, the update window links to the release page instead.
+An update is installed only after the disk image matches the SHA-256 checksum GitHub publishes for it, and the app inside has the OpenToolbox bundle identifier, the release's version number, and a valid code signature. It replaces the app when you restart or quit. Before downloading and again just before replacing the app, OpenToolbox checks that the app on disk is still the copy that was opened, and that the downloaded copy is still the one it verified, down to every architecture in its executable. If OpenToolbox can't write to its own folder, or macOS is running it from a temporary location, the update window links to the release page instead.
+
+If installing an update fails when you quit, OpenToolbox tells you why the next time you open it. Turning on the automatic check checks right away. Turning off automatic download and install stops an automatic download that is under way and discards an automatically downloaded update that hasn't been installed yet.
 
 ## Known Limitations
 
@@ -100,6 +102,9 @@ An update is installed only after the disk image matches the SHA-256 checksum Gi
 - Switching to another tool resets the one you left and stops a running Network Speed Test.
 - With two OpenToolbox windows open, `⌘K` shows Quick Open in both.
 - Releases are ad-hoc signed, so an update's code signature proves the app is intact but not who built it. Trust in an update rests on the GitHub release it comes from.
+- If you run two copies of OpenToolbox from the same folder at once, the one you open later removes an update the other has downloaded and is waiting to install. Choose **Check for Updates…** in the first copy to download it again.
+- When OpenToolbox opens, it records the app on disk that an update may later replace. If something replaces the app on disk at that exact moment, an update installed from that session replaces the new copy instead.
+- If macOS reports an update's disk image without its file path, OpenToolbox can't eject it, and the image stays mounted (hidden and read-only) until you restart.
 
 ## Building from Source
 

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import Security
 
 /// Runs a system tool for the installer. Injected so tests can observe the commands.
 public protocol UpdateCommandRunner: Sendable {
@@ -14,11 +15,28 @@ public struct SystemUpdateCommandRunner: UpdateCommandRunner {
     }
 }
 
+/// The running app's bundle as it was when the app started: its location, file identity and contents.
+public struct InstalledApp: Equatable, Sendable {
+    public let url: URL
+    let identity: FileIdentity
+    let contents: BundleContents
+}
+
+/// SHA-256 digests of a bundle's whole main executable, every architecture included, and its `Info.plist`.
+struct BundleContents: Equatable, Sendable {
+    let executable: String
+    let infoPlist: String
+}
+
 /// A verified update copied next to the installed app, waiting to be swapped in.
 public struct PreparedUpdate: Equatable, Sendable {
     public let version: AppVersion
     public let stagedApp: URL
-    public let installedApp: URL
+    let installed: InstalledApp
+    let codeHash: Data
+    let contents: BundleContents
+
+    public var installedApp: URL { installed.url }
 }
 
 /// Downloads, verifies, stages and installs a release disk image over the running app.
@@ -66,16 +84,38 @@ public struct UpdateInstaller: Sendable {
         return nil
     }
 
+    /// Records the identity and contents of the app at `url`, or `nil` when it is not a readable app bundle.
+    public static func installedApp(at url: URL) -> InstalledApp? {
+        guard let identity = fileIdentity(at: url), let contents = contents(of: url) else { return nil }
+        return InstalledApp(url: url, identity: identity, contents: contents)
+    }
+
     /// Downloads `update`, checks its size, SHA-256, bundle identifier, version and code signature,
-    /// and copies the app next to `installedApp` without touching the installed copy.
+    /// and copies the app next to `installed` without touching the installed copy.
     public func prepare(
         _ update: AppUpdate,
-        replacing installedApp: URL,
+        replacing installed: InstalledApp,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> PreparedUpdate {
-        let work = workRoot.appending(path: UUID().uuidString, directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: work) }
+        guard Self.isUnchanged(installed) else { throw Self.replacedError }
+        let id = UUID().uuidString
+        let pending = workRoot.appending(path: ".pending-\(id)", directoryHint: .isDirectory)
+        let work = workRoot.appending(path: id, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: pending, withIntermediateDirectories: true)
+        guard let lease = Self.lease(pending) else {
+            try? FileManager.default.removeItem(at: pending)
+            throw UpdateError.installFailed(coreLocalized("The update's work folder could not be locked."))
+        }
+        guard rename(pending.path, work.path) == 0 else {
+            close(lease)
+            try? FileManager.default.removeItem(at: pending)
+            throw UpdateError.installFailed(coreLocalized("The update's work folder could not be locked."))
+        }
+        var keepWork = false
+        defer {
+            if !keepWork { try? FileManager.default.removeItem(at: work) }
+            close(lease)
+        }
 
         let image = work.appending(path: update.diskImageName)
         try await downloader.download(from: update.diskImageURL, to: image) { progress($0 * 0.8) }
@@ -90,30 +130,69 @@ public struct UpdateInstaller: Sendable {
 
         let mountRoot = work.appending(path: "mount", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: mountRoot, withIntermediateDirectories: true)
-        let mountPoint = try await attach(image, under: mountRoot)
+        let staged: (app: URL, codeHash: Data, contents: BundleContents)
         do {
-            let staged = try await stage(from: mountPoint, version: update.version, next: installedApp)
-            await detach(mountPoint)
-            progress(1)
-            return PreparedUpdate(version: update.version, stagedApp: staged, installedApp: installedApp)
+            let mountPoint = try await attach(image, under: mountRoot)
+            try Task.checkCancellation()
+            staged = try await stage(from: mountPoint, version: update.version, next: installed.url)
         } catch {
-            await detach(mountPoint)
+            if !(await detach(image)) { keepWork = true }
             throw error
         }
+        guard await detach(image) else {
+            keepWork = true
+            try? FileManager.default.removeItem(at: staged.app)
+            throw UpdateError.installFailed(coreLocalized("The update's disk image could not be ejected."))
+        }
+
+        let prepared = PreparedUpdate(
+            version: update.version, stagedApp: staged.app, installed: installed,
+            codeHash: staged.codeHash, contents: staged.contents)
+        guard !Task.isCancelled, isVerifiedCopy(prepared) else {
+            discard(prepared)
+            if Task.isCancelled { throw CancellationError() }
+            throw UpdateError.diskImageContents(coreLocalized("its code signature is not valid."))
+        }
+        progress(1)
+        return prepared
     }
 
     /// Swaps the staged app into place in one rename, then removes the previous copy.
+    ///
+    /// The staged copy must still be the bundle that was verified, and the installed path must still hold
+    /// the app, byte for byte, that was running when OpenToolbox started.
     public func install(_ prepared: PreparedUpdate) throws {
         let staged = prepared.stagedApp
-        let installed = prepared.installedApp
-        guard staged.deletingLastPathComponent() == installed.deletingLastPathComponent(),
+        let installed = prepared.installed
+        guard staged.deletingLastPathComponent() == installed.url.deletingLastPathComponent(),
             Self.isStagedName(staged.lastPathComponent),
-            Self.bundleInfo(at: staged)?.identifier == bundleIdentifier
-        else { throw UpdateError.installFailed(coreLocalized("The prepared update is missing.")) }
+            isVerifiedCopy(prepared)
+        else { throw UpdateError.installFailed(coreLocalized("The prepared update is missing or has changed.")) }
+        guard Self.isUnchanged(installed) else { throw Self.replacedError }
 
-        guard renamex_np(staged.path, installed.path, UInt32(RENAME_SWAP)) == 0 else {
+        let swapping = staged.deletingLastPathComponent().appending(
+            path: "OpenToolbox (update in progress \(UUID().uuidString.prefix(8))).app", directoryHint: .isDirectory)
+        guard renamex_np(staged.path, swapping.path, UInt32(RENAME_EXCL)) == 0 else {
             throw UpdateError.installFailed(String(cString: strerror(errno)))
         }
+        guard renamex_np(swapping.path, installed.url.path, UInt32(RENAME_SWAP)) == 0 else {
+            let reason = String(cString: strerror(errno))
+            guard renamex_np(swapping.path, staged.path, UInt32(RENAME_EXCL)) == 0 else {
+                throw UpdateError.installFailed(Self.updateLeftNote(reason, at: swapping))
+            }
+            throw UpdateError.installFailed(reason)
+        }
+        let displaced = InstalledApp(url: swapping, identity: installed.identity, contents: installed.contents)
+        guard Self.isUnchanged(displaced) else { throw Self.restore(swapping, to: installed.url, staged: staged) }
+        try? FileManager.default.removeItem(at: swapping)
+    }
+
+    /// Removes the staged copy of an update that will not be installed.
+    public func discard(_ prepared: PreparedUpdate) {
+        let staged = prepared.stagedApp
+        guard Self.isStagedName(staged.lastPathComponent),
+            Self.bundleInfo(at: staged)?.identifier == bundleIdentifier
+        else { return }
         try? FileManager.default.removeItem(at: staged)
     }
 
@@ -137,22 +216,27 @@ public struct UpdateInstaller: Sendable {
     }
 
     /// Detaches disk images and removes downloads that an interrupted update left in the work folder.
+    /// Work folders that another running copy of OpenToolbox still holds are left alone.
     public func removeStaleWork() async {
-        let root = workRoot.resolvingSymlinksInPath().path + "/"
-        if let output = try? await commands.run("/usr/bin/hdiutil", arguments: ["info", "-plist"]),
-            let plist = try? PropertyListSerialization.propertyList(from: output, format: nil) as? [String: Any],
-            let images = plist["images"] as? [[String: Any]]
-        {
-            let mounts = images.flatMap { ($0["system-entities"] as? [[String: Any]]) ?? [] }
-                .compactMap { $0["mount-point"] as? String }
-                .map { URL(fileURLWithPath: $0, isDirectory: true) }
-            for mount in mounts where mount.resolvingSymlinksInPath().path.hasPrefix(root) {
-                await detach(mount)
-            }
-        }
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: workRoot.path) else { return }
+        var leased: [(folder: URL, lease: Int32)] = []
         for name in names where UUID(uuidString: name) != nil {
-            try? FileManager.default.removeItem(at: workRoot.appending(path: name, directoryHint: .isDirectory))
+            let folder = workRoot.appending(path: name, directoryHint: .isDirectory)
+            if let lease = Self.lease(folder) { leased.append((folder, lease)) }
+        }
+        defer { for entry in leased { close(entry.lease) } }
+        guard !leased.isEmpty, let images = await Self.attachedImages(commands) else { return }
+
+        var kept = Set<URL>()
+        for image in images {
+            guard let entry = leased.first(where: { entry in
+                let prefix = Self.resolved(entry.folder.path) + "/"
+                return image.path.hasPrefix(prefix) || image.mountPoints.contains { $0.hasPrefix(prefix) }
+            }) else { continue }
+            if !(await detach(URL(fileURLWithPath: image.path))) { kept.insert(entry.folder) }
+        }
+        for entry in leased where !kept.contains(entry.folder) {
+            try? FileManager.default.removeItem(at: entry.folder)
         }
     }
 
@@ -162,40 +246,175 @@ public struct UpdateInstaller: Sendable {
         return UUID(uuidString: String(id)) != nil
     }
 
-    static func bundleInfo(at app: URL) -> (identifier: String, version: AppVersion?)? {
+    static func bundleInfo(at app: URL) -> (identifier: String, version: AppVersion?, versionString: String?)? {
         let plist = app.appending(path: "Contents/Info.plist")
         guard let data = try? Data(contentsOf: plist),
             let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
             let identifier = info["CFBundleIdentifier"] as? String
         else { return nil }
-        return (identifier, (info["CFBundleShortVersionString"] as? String).flatMap(AppVersion.init))
+        let versionString = info["CFBundleShortVersionString"] as? String
+        return (identifier, versionString.flatMap(AppVersion.init), versionString)
+    }
+
+    static func fileIdentity(at url: URL) -> FileIdentity? {
+        var info = stat()
+        guard lstat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else { return nil }
+        return FileIdentity(info)
+    }
+
+    static func contents(of app: URL) -> BundleContents? {
+        let plist = app.appending(path: "Contents/Info.plist")
+        guard let data = try? Data(contentsOf: plist),
+            let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+            let name = info["CFBundleExecutable"] as? String, !name.isEmpty, !name.contains("/")
+        else { return nil }
+        let executable = app.appending(path: "Contents/MacOS/\(name)")
+        var status = stat()
+        guard lstat(executable.path, &status) == 0, status.st_mode & S_IFMT == S_IFREG,
+            let digest = try? HashGenerator.hashFile(at: executable, algorithm: .sha256)
+        else { return nil }
+        return BundleContents(executable: digest, infoPlist: HashGenerator.hash(data, algorithm: .sha256))
+    }
+
+    /// Takes an exclusive, non-blocking lock on `folder`, held until the returned descriptor is closed.
+    static func lease(_ folder: URL) -> Int32? {
+        let descriptor = open(folder.appending(path: ".lease").path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        guard descriptor >= 0 else { return nil }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            close(descriptor)
+            return nil
+        }
+        return descriptor
+    }
+
+    /// The code directory hash of `app` when its signature is valid for every architecture and nested item.
+    static func codeHash(of app: URL) -> Data? {
+        var code: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(app as CFURL, [], &code) == errSecSuccess, let code else { return nil }
+        let checks = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSCheckNestedCode | kSecCSStrictValidate)
+        guard SecStaticCodeCheckValidity(code, checks, nil) == errSecSuccess else { return nil }
+        var information: CFDictionary?
+        guard SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &information)
+            == errSecSuccess,
+            let dictionary = information as NSDictionary?
+        else { return nil }
+        return dictionary[kSecCodeInfoUnique as String] as? Data
+    }
+
+    private static var replacedMessage: String {
+        coreLocalized("OpenToolbox was moved, replaced or changed after it was opened. Quit and reopen it, then try again.")
+    }
+
+    private static var replacedError: UpdateError { .installFailed(replacedMessage) }
+
+    private static func isUnchanged(_ app: InstalledApp) -> Bool {
+        fileIdentity(at: app.url) == app.identity && contents(of: app.url) == app.contents
+    }
+
+    /// Puts back an item that turned out to be at the installed path during the swap. `displaced` has a name
+    /// that startup cleanup never removes, so the item stays there if it can't be put back.
+    private static func restore(_ displaced: URL, to original: URL, staged: URL) -> UpdateError {
+        guard renamex_np(displaced.path, original.path, UInt32(RENAME_SWAP)) == 0 else {
+            return .installFailed(coreLocalized(
+                "Another app was found in place of OpenToolbox during the update. It was kept at \(displaced.path)."))
+        }
+        guard renamex_np(displaced.path, staged.path, UInt32(RENAME_EXCL)) == 0 else {
+            return .installFailed(updateLeftNote(replacedMessage, at: displaced))
+        }
+        return replacedError
+    }
+
+    private static func updateLeftNote(_ reason: String, at location: URL) -> String {
+        coreLocalized("\(reason) The downloaded update was left at \(location.path).")
+    }
+
+    private func isVerifiedCopy(_ prepared: PreparedUpdate) -> Bool {
+        let app = prepared.stagedApp
+        let values = try? app.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard values?.isDirectory == true, values?.isSymbolicLink == false,
+            let info = Self.bundleInfo(at: app), info.identifier == bundleIdentifier,
+            info.versionString == prepared.version.description,
+            Self.contents(of: app) == prepared.contents
+        else { return false }
+        return Self.codeHash(of: app) == prepared.codeHash
     }
 
     private func attach(_ image: URL, under mountRoot: URL) async throws -> URL {
-        let output = try await commands.run("/usr/bin/hdiutil", arguments: [
-            "attach", "-nobrowse", "-readonly", "-noautoopen", "-mountroot", mountRoot.path, "-plist", image.path,
-        ])
-        guard let plist = try? PropertyListSerialization.propertyList(from: output, format: nil) as? [String: Any],
-            let entities = plist["system-entities"] as? [[String: Any]],
-            let path = entities.compactMap({ $0["mount-point"] as? String }).first
-        else { throw UpdateError.diskImageContents(coreLocalized("it could not be opened.")) }
+        let commands = commands
+        let output = try await Task.detached {
+            try await commands.run("/usr/bin/hdiutil", arguments: [
+                "attach", "-nobrowse", "-readonly", "-noautoopen", "-mountroot", mountRoot.path, "-plist", image.path,
+            ])
+        }.value
+        let plist = try? PropertyListSerialization.propertyList(from: output, format: nil) as? [String: Any]
+        let entities = plist?["system-entities"] as? [[String: Any]]
+        guard let path = entities?.compactMap({ $0["mount-point"] as? String }).first else {
+            throw UpdateError.diskImageContents(coreLocalized("it could not be opened."))
+        }
         let mountPoint = URL(fileURLWithPath: path, isDirectory: true)
         guard mountPoint.deletingLastPathComponent().resolvingSymlinksInPath().path
             == mountRoot.resolvingSymlinksInPath().path
-        else {
-            await detach(mountPoint)
-            throw UpdateError.diskImageContents(coreLocalized("it opened in an unexpected location."))
-        }
+        else { throw UpdateError.diskImageContents(coreLocalized("it opened in an unexpected location.")) }
         return mountPoint
     }
 
-    private func detach(_ mountPoint: URL) async {
-        if (try? await commands.run("/usr/bin/hdiutil", arguments: ["detach", mountPoint.path])) == nil {
-            _ = try? await commands.run("/usr/bin/hdiutil", arguments: ["detach", "-force", mountPoint.path])
+    /// Detaches `image` if it is attached, looking up its current device before each attempt.
+    /// Returns whether the image is no longer attached.
+    private func detach(_ image: URL) async -> Bool {
+        let commands = commands
+        let target = Self.resolved(image.path)
+        return await Task.detached {
+            for arguments in [["detach"], ["detach", "-force"]] {
+                guard let images = await Self.attachedImages(commands) else { return false }
+                guard let image = images.first(where: { $0.path == target }) else { return true }
+                guard let device = image.device else { return false }
+                _ = try? await commands.run("/usr/bin/hdiutil", arguments: arguments + [device])
+            }
+            guard let images = await Self.attachedImages(commands) else { return false }
+            return !images.contains { $0.path == target }
+        }.value
+    }
+
+    private struct AttachedImage: Sendable {
+        let path: String
+        let device: String?
+        let mountPoints: [String]
+    }
+
+    private static func attachedImages(_ commands: UpdateCommandRunner) async -> [AttachedImage]? {
+        guard let output = try? await commands.run("/usr/bin/hdiutil", arguments: ["info", "-plist"]),
+            let plist = try? PropertyListSerialization.propertyList(from: output, format: nil) as? [String: Any],
+            let images = plist["images"] as? [[String: Any]]
+        else { return nil }
+        return images.compactMap { image in
+            guard let path = image["image-path"] as? String else { return nil }
+            let entities = (image["system-entities"] as? [[String: Any]]) ?? []
+            return AttachedImage(
+                path: resolved(path), device: entities.first?["dev-entry"] as? String,
+                mountPoints: entities.compactMap { $0["mount-point"] as? String }.map(resolved))
         }
     }
 
-    private func stage(from mountPoint: URL, version: AppVersion, next installedApp: URL) async throws -> URL {
+    /// The canonical form of `path`: its deepest existing folder through `realpath`, then the rest as given.
+    static func resolved(_ path: String) -> String {
+        var existing = URL(fileURLWithPath: path).standardizedFileURL
+        var rest: [String] = []
+        while existing.path != "/" {
+            if let real = realpath(existing.path, nil) {
+                defer { free(real) }
+                return rest.reversed().reduce(URL(fileURLWithPath: String(cString: real))) {
+                    $0.appending(path: $1)
+                }.path
+            }
+            rest.append(existing.lastPathComponent)
+            existing.deleteLastPathComponent()
+        }
+        return path
+    }
+
+    private func stage(from mountPoint: URL, version: AppVersion, next installedApp: URL) async throws
+        -> (app: URL, codeHash: Data, contents: BundleContents)
+    {
         let source = mountPoint.appending(path: "OpenToolbox.app", directoryHint: .isDirectory)
         let values = try? source.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard values?.isDirectory == true, values?.isSymbolicLink == false else {
@@ -204,28 +423,21 @@ public struct UpdateInstaller: Sendable {
         guard let info = Self.bundleInfo(at: source), info.identifier == bundleIdentifier else {
             throw UpdateError.diskImageContents(coreLocalized("the app has a different bundle identifier."))
         }
-        guard info.version == version else {
+        guard info.versionString == version.description else {
             throw UpdateError.diskImageContents(coreLocalized("the app's version does not match the release."))
         }
-        try await verifySignature(source)
+        guard let codeHash = Self.codeHash(of: source), let contents = Self.contents(of: source) else {
+            throw UpdateError.diskImageContents(coreLocalized("its code signature is not valid."))
+        }
 
         let staged = installedApp.deletingLastPathComponent()
             .appending(path: "\(Self.stagedPrefix)\(UUID().uuidString).app", directoryHint: .isDirectory)
         do {
             _ = try await commands.run("/usr/bin/ditto", arguments: [source.path, staged.path])
-            try await verifySignature(staged)
         } catch {
             try? FileManager.default.removeItem(at: staged)
             throw error
         }
-        return staged
-    }
-
-    private func verifySignature(_ app: URL) async throws {
-        do {
-            _ = try await commands.run("/usr/bin/codesign", arguments: ["--verify", "--deep", "--strict", app.path])
-        } catch {
-            throw UpdateError.diskImageContents(coreLocalized("its code signature is not valid."))
-        }
+        return (staged, codeHash, contents)
     }
 }

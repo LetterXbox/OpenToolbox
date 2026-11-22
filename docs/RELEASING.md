@@ -33,15 +33,15 @@ scripts/package-app.sh <version> <build-number>
 ```
 
 The script builds a universal, ad-hoc signed `OpenToolbox.app`. Its output is in `.build/release-app/dist/`:
-- `OpenToolbox-<version>-macOS-universal.zip`;
-- `OpenToolbox-<version>-macOS-universal.dmg`, a drag-to-Applications disk image made by `scripts/make-dmg.sh` from the same app;
-- a matching `.sha256` file for each.
+- `OpenToolbox.app`;
+- `OpenToolbox-<version>-macOS-universal.dmg`, a drag-to-Applications disk image made by `scripts/make-dmg.sh` from that app;
+- the disk image's `.sha256` file.
 
-Before publishing, unzip that exact zip into a fresh folder, launch the app, and confirm it opens with no crash. `make-dmg.sh` checks that the app inside the disk image is identical and validly signed.
+`make-dmg.sh` checks that the app inside the disk image is identical to the built app and validly signed. Before publishing, mount that exact disk image, copy the app to a fresh folder, launch it, and confirm it opens with no crash.
 
 ## 4. Publish
 
-Create a GitHub release tagged `v<version>` on the release commit. Attach the disk image, the zip and their `.sha256` files. The notes must include:
+Create a GitHub release tagged `v<version>` on the release commit. Attach only the disk image, and put its SHA-256 in the notes. The notes must include:
 - the "Open Anyway" install steps (releases are not notarized);
 - what was and wasn't tested;
 - the known limitations.

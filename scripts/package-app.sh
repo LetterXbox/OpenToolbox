@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Builds an unsigned (ad-hoc signed) universal OpenToolbox.app and a release zip.
+# Builds an unsigned (ad-hoc signed) universal OpenToolbox.app and its release disk image.
 #
 # Usage: scripts/package-app.sh [version] [build-number]
-# Output: .build/release-app/dist/OpenToolbox-<version>-macOS-universal.zip and .dmg (+ .sha256 each)
+# Output: .build/release-app/dist/OpenToolbox.app and OpenToolbox-<version>-macOS-universal.dmg (+ .sha256)
 #
 # Runs on macOS with Xcode 16 or later. The app is ad-hoc signed only, so on first
 # launch users approve it in System Settings → Privacy & Security → Open Anyway.
@@ -18,7 +18,6 @@ DERIVED="$WORK/DerivedData"
 DIST="$WORK/dist"
 PRODUCTS="$DERIVED/Build/Products/Release"
 APP="$DIST/OpenToolbox.app"
-ZIP_NAME="OpenToolbox-$VERSION-macOS-universal.zip"
 
 rm -rf "$WORK"
 mkdir -p "$DIST"
@@ -104,11 +103,5 @@ for arch in arm64 x86_64; do
     echo "-- $arch"
     vtool -arch "$arch" -show-build "$APP/Contents/MacOS/OpenToolbox" | grep -E 'platform|minos'
 done
-
-echo "==> Zipping"
-ditto -c -k --sequesterRsrc --keepParent "$APP" "$DIST/$ZIP_NAME"
-(cd "$DIST" && shasum -a 256 "$ZIP_NAME" > "$ZIP_NAME.sha256" && cat "$ZIP_NAME.sha256")
-
-echo "==> Done: $DIST/$ZIP_NAME"
 
 "$ROOT/scripts/make-dmg.sh" "$VERSION"

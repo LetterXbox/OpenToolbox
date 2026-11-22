@@ -3,9 +3,6 @@
 #
 # Usage: scripts/package-app.sh [version] [build-number]
 # Output: .build/release-app/dist/OpenToolbox.app and OpenToolbox-<version>-macOS-universal.dmg (+ .sha256)
-#
-# Runs on macOS with Xcode 16 or later. The app is ad-hoc signed only, so on first
-# launch users approve it in System Settings → Privacy & Security → Open Anyway.
 set -euo pipefail
 
 VERSION="${1:-0.1.0}"
@@ -31,9 +28,6 @@ xcodebuild \
     ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
     build
 
-# SwiftPM resource bundles must be found inside the app. The generated accessors
-# have to look in Bundle.main.resourceURL (Contents/Resources); otherwise the app
-# would crash on its first localized string.
 echo "==> Checking resource bundle accessors"
 accessors=()
 while IFS= read -r file; do accessors+=("$file"); done < <(

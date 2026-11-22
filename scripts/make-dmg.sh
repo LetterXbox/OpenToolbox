@@ -4,8 +4,6 @@
 # Usage: scripts/make-dmg.sh [version]
 # Input:  .build/release-app/dist/OpenToolbox.app (from scripts/package-app.sh)
 # Output: .build/release-app/dist/OpenToolbox-<version>-macOS-universal.dmg (+ .sha256)
-#
-# It does not rebuild the app, so the disk image holds exactly the app that was built and checked.
 set -euo pipefail
 
 VERSION="${1:-0.1.0}"

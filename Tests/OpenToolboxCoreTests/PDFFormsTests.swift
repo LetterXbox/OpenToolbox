@@ -41,7 +41,7 @@ struct PDFFormsTests {
 
     @Test func refusesEmptyDocuments() async throws {
         try await withTemporaryDirectory { directory in
-            #expect(throws: PDFToolError.empty) {
+            _ = #expect(throws: PDFToolError.empty) {
                 try PDFForms.write(PDFDocument(), to: directory.appending(path: "x.pdf"), flatten: true)
             }
         }

@@ -192,8 +192,8 @@ public enum EngineProcess {
         }
 
         let box = ProcessGroupBox(pid: childPID, killGraceDelay: killGraceDelay)
-        let stdoutHandle = FileHandle(fileDescriptor: stdoutFDs[0], closeOnDealloc: true)
-        let stderrHandle = FileHandle(fileDescriptor: stderrFDs[0], closeOnDealloc: true)
+        let stdoutReadFD = stdoutFDs[0]
+        let stderrReadFD = stderrFDs[0]
         let stdinWriteFD = stdinFDs[1]
         if standardInput != nil {
             _ = fcntl(stdinWriteFD, F_SETNOSIGPIPE, 1)
@@ -203,8 +203,8 @@ public enum EngineProcess {
             if let standardInput {
                 writeAllAsync(standardInput, to: stdinWriteFD)
             }
-            async let stdoutData = readStream(stdoutHandle, maxBytes: maxOutputBytes, onLine: onStdoutLine)
-            async let stderrData = readStream(stderrHandle, maxBytes: maxOutputBytes, onLine: onStderrLine)
+            async let stdoutData = readStream(stdoutReadFD, maxBytes: maxOutputBytes, onLine: onStdoutLine)
+            async let stderrData = readStream(stderrReadFD, maxBytes: maxOutputBytes, onLine: onStderrLine)
             let exitCode = await waitForExit(pid: childPID)
             let (out, err) = await (stdoutData, stderrData)
             box.markFinished()
@@ -256,23 +256,32 @@ public enum EngineProcess {
     }
 
     private static func readStream(
-        _ handle: FileHandle,
+        _ fd: Int32,
         maxBytes: Int,
         onLine: (@Sendable (String) -> Void)?
     ) async -> Data {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
+                defer { close(fd) }
                 var collected = Data()
                 var lineBuffer = Data()
+                var buffer = [UInt8](repeating: 0, count: 4_096)
                 while true {
-                    let chunk = (try? handle.read(upToCount: 32 * 1_024)) ?? Data()
-                    if chunk.isEmpty { break }
+                    let count = buffer.withUnsafeMutableBytes { raw in
+                        Darwin.read(fd, raw.baseAddress, raw.count)
+                    }
+                    if count < 0 {
+                        if errno == EINTR { continue }
+                        break
+                    }
+                    if count == 0 { break }
                     if collected.count < maxBytes {
                         let remaining = maxBytes - collected.count
-                        collected.append(chunk.prefix(remaining))
+                        collected.append(buffer, count: min(count, remaining))
                     }
                     if let onLine {
-                        for byte in chunk {
+                        for index in 0..<count {
+                            let byte = buffer[index]
                             if byte == 0x0a || byte == 0x0d {
                                 if !lineBuffer.isEmpty {
                                     onLine(String(decoding: lineBuffer, as: UTF8.self))
@@ -287,7 +296,6 @@ public enum EngineProcess {
                 if let onLine, !lineBuffer.isEmpty {
                     onLine(String(decoding: lineBuffer, as: UTF8.self))
                 }
-                try? handle.close()
                 continuation.resume(returning: collected)
             }
         }

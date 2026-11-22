@@ -57,7 +57,7 @@ final class UpdateCenter {
 
         if unsupportedReason == nil { installer?.removeLeftovers(next: appURL) }
         timer = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.checkIfDue() }
+            MainActor.assumeIsolated { self?.checkIfDue() }
         }
         checkIfDue()
     }
@@ -143,6 +143,11 @@ final class UpdateCenter {
         checkNow(userInitiated: false)
     }
 
+    private func showProgress(_ fraction: Double, for update: AppUpdate) {
+        guard case .downloading(let current, _) = phase, current == update else { return }
+        phase = .downloading(update, fraction)
+    }
+
     private func recordCheck() {
         let now = Date()
         lastChecked = now
@@ -156,10 +161,7 @@ final class UpdateCenter {
         task = Task {
             do {
                 let prepared = try await installer.prepare(update, replacing: appURL) { fraction in
-                    Task { @MainActor [weak self] in
-                        guard let self, case .downloading(let current, _) = self.phase, current == update else { return }
-                        self.phase = .downloading(update, fraction)
-                    }
+                    Task { @MainActor in self.showProgress(fraction, for: update) }
                 }
                 phase = .ready(prepared)
                 if presentWhenReady { windowRequest += 1 }

@@ -49,6 +49,7 @@ struct OpenToolboxApp: App {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let updates = UpdateCenter()
 

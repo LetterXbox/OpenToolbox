@@ -95,7 +95,7 @@ struct TranslateView: View {
                 .foregroundStyle(.secondary)
         }
         .task {
-            let supported = await LanguageAvailability().supportedLanguages
+            let supported = await TranslationLanguages.supported()
             languages = supported.sorted { languageName($0) < languageName($1) }
             if !languages.contains(target), let english = languages.first(where: { $0.minimalIdentifier == "en" }) {
                 target = english

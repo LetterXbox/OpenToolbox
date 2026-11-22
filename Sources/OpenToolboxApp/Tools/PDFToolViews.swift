@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 // MARK: - Merge / Split / Organize
 
 struct PDFOrganizeView: View {
-    enum Mode: Hashable { case merge, extract, split, rotate }
+    enum Mode: Hashable { case merge, extract, delete, split, rotate }
 
     @Environment(AppModel.self) private var model
     let tool: ToolDescriptor
@@ -30,6 +30,7 @@ struct PDFOrganizeView: View {
             Picker(L("Action"), selection: $mode) {
                 Text(L("Merge")).tag(Mode.merge)
                 Text(L("Extract Pages")).tag(Mode.extract)
+                Text(L("Delete Pages")).tag(Mode.delete)
                 Text(L("Split")).tag(Mode.split)
                 Text(L("Rotate Pages")).tag(Mode.rotate)
             }
@@ -53,7 +54,7 @@ struct PDFOrganizeView: View {
             switch mode {
             case .merge:
                 EmptyView()
-            case .extract:
+            case .extract, .delete:
                 TextField(L("Pages, for example 1-3, 5, 8-"), text: $pageRange)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 360)
@@ -100,6 +101,7 @@ struct PDFOrganizeView: View {
         switch mode {
         case .merge: L("Merge \(files.count) PDFs")
         case .extract: L("Extract Pages")
+        case .delete: L("Delete and Save")
         case .split: L("Split PDF")
         case .rotate: L("Rotate and Save")
         }
@@ -145,6 +147,11 @@ struct PDFOrganizeView: View {
             let document = try PDFTools.open(files[0])
             let pages = try PageRange.parse(range, pageCount: document.pageCount)
             return [try save(PDFTools.extract(pages, from: document), base + " pages")]
+        case .delete:
+            let document = try PDFTools.open(files[0])
+            guard !range.trimmingCharacters(in: .whitespaces).isEmpty else { throw PDFToolError.invalidRange(range) }
+            let pages = try PageRange.parse(range, pageCount: document.pageCount)
+            return [try save(PDFTools.delete(Set(pages), from: document), base + " edited")]
         case .split:
             let document = try PDFTools.open(files[0])
             return try PDFTools.split(document, pagesPerFile: pagesPerFile).enumerated().map { index, part in

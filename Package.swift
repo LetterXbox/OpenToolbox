@@ -12,7 +12,10 @@ let package = Package(
     targets: [
         .target(
             name: "OpenToolboxCore",
-            resources: [.process("Resources")]
+            resources: [.process("Resources")],
+            linkerSettings: [
+                .unsafeFlags(["-Xlinker", "-weak_framework", "-Xlinker", "FoundationModels"]),
+            ]
         ),
         .executableTarget(
             name: "OpenToolboxApp",
@@ -22,6 +25,10 @@ let package = Package(
         .testTarget(
             name: "OpenToolboxCoreTests",
             dependencies: ["OpenToolboxCore"]
+        ),
+        .testTarget(
+            name: "OpenToolboxAppTests",
+            dependencies: ["OpenToolboxApp", "OpenToolboxCore"]
         ),
     ]
 )

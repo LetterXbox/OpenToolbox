@@ -83,6 +83,14 @@ public enum ToolCatalog {
             id: "dev.csv-json", category: .developer,
             title: "CSV ↔ JSON", summary: "Convert between CSV and JSON.",
             symbolName: "tablecells", keywords: ["csv", "json", "table", "convert"]),
+        ToolDescriptor(
+            id: "dev.color-picker", category: .developer,
+            title: "Color Picker", summary: "Pick a color anywhere on screen and copy it as hex, RGB, or HSL.",
+            symbolName: "eyedropper", keywords: ["color", "colour", "picker", "eyedropper", "hex", "rgb", "hsl"]),
+        ToolDescriptor(
+            id: "dev.coordinates", category: .developer,
+            title: "Coordinate Picker", summary: "Find a place on a map and copy its latitude and longitude.",
+            symbolName: "mappin.and.ellipse", keywords: ["coordinates", "latitude", "longitude", "gps", "map", "location", "geo"]),
     ]
 
     // MARK: - Text & Files
@@ -108,6 +116,22 @@ public enum ToolCatalog {
             id: "files.duplicates", category: .textAndFiles,
             title: "Find Duplicates", summary: "Find duplicate files by content.",
             symbolName: "doc.on.doc", keywords: ["duplicate", "dedupe", "files"]),
+        ToolDescriptor(
+            id: "text.translate", category: .textAndFiles,
+            title: "Translate", summary: "Translate text on-device with Apple Translation.",
+            symbolName: "translate", keywords: ["translate", "translation", "language"]),
+        ToolDescriptor(
+            id: "text.speech", category: .textAndFiles,
+            title: "Text to Speech", summary: "Read text aloud or save it as an audio file.",
+            symbolName: "speaker.wave.2", keywords: ["speech", "speak", "voice", "tts", "read aloud", "audio"]),
+        ToolDescriptor(
+            id: "text.transcribe", category: .textAndFiles,
+            title: "Transcribe", summary: "Turn speech in audio and video files into text, on-device.",
+            symbolName: "waveform", keywords: ["transcribe", "transcript", "speech", "subtitles", "srt", "dictation"]),
+        ToolDescriptor(
+            id: "text.summarize", category: .textAndFiles,
+            title: "Summarize", summary: "Summarize text and documents on-device with Apple Intelligence.",
+            symbolName: "sparkles", keywords: ["summarize", "summary", "tldr", "ai", "apple intelligence"]),
     ]
 
     // MARK: - Images & PDF
@@ -135,8 +159,8 @@ public enum ToolCatalog {
             symbolName: "text.viewfinder", keywords: ["ocr", "text", "recognize", "scan"]),
         ToolDescriptor(
             id: "pdf.organize", category: .imagesAndPDF,
-            title: "Organize PDFs", summary: "Merge, split, and reorder PDF pages.",
-            symbolName: "doc.richtext", keywords: ["pdf", "merge", "split", "pages"]),
+            title: "Organize PDFs", summary: "Merge, split, extract, delete, and rotate PDF pages.",
+            symbolName: "doc.richtext", keywords: ["pdf", "merge", "split", "pages", "delete", "remove", "rotate"]),
         ToolDescriptor(
             id: "pdf.images", category: .imagesAndPDF,
             title: "Images ↔ PDF", summary: "Combine images into a PDF or export pages as images.",
@@ -145,6 +169,30 @@ public enum ToolCatalog {
             id: "image.watermark", category: .imagesAndPDF,
             title: "Watermark", summary: "Add a text or image watermark to images and PDFs.",
             symbolName: "signature", keywords: ["watermark", "stamp", "logo", "copyright", "draft", "pdf"]),
+        ToolDescriptor(
+            id: "image.compress", category: .imagesAndPDF,
+            title: "Compress Images", summary: "Make images smaller by lowering quality or size.",
+            symbolName: "arrow.down.right.and.arrow.up.left", keywords: ["compress", "shrink", "smaller", "optimize", "jpeg", "heic", "size"]),
+        ToolDescriptor(
+            id: "pdf.crop", category: .imagesAndPDF,
+            title: "Crop PDF", summary: "Trim the margins of PDF pages.",
+            symbolName: "crop", keywords: ["pdf", "crop", "margins", "trim"]),
+        ToolDescriptor(
+            id: "pdf.password", category: .imagesAndPDF,
+            title: "PDF Password", summary: "Add a password to a PDF or remove one.",
+            symbolName: "lock.doc", keywords: ["pdf", "password", "encrypt", "decrypt", "unlock", "protect"]),
+        ToolDescriptor(
+            id: "pdf.forms", category: .imagesAndPDF,
+            title: "Fill & Flatten Forms", summary: "Fill in PDF forms and flatten them into the page.",
+            symbolName: "rectangle.and.pencil.and.ellipsis", keywords: ["pdf", "form", "fill", "flatten", "fields"]),
+        ToolDescriptor(
+            id: "pdf.scan", category: .imagesAndPDF,
+            title: "Scan Document", summary: "Scan pages from a scanner or an iPhone into a PDF.",
+            symbolName: "doc.viewfinder", keywords: ["scan", "scanner", "document", "iphone", "continuity camera", "pdf"]),
+        ToolDescriptor(
+            id: "pdf.web", category: .imagesAndPDF,
+            title: "Web Page to PDF", summary: "Save a web page as a PDF.",
+            symbolName: "globe", keywords: ["web", "webpage", "url", "html", "pdf", "save"]),
     ]
 
     // MARK: - Mac Utilities
@@ -178,11 +226,35 @@ public enum ToolCatalog {
             id: "mac.hidden-settings", category: .macUtilities,
             title: "Hidden Settings", summary: "Toggle documented hidden macOS preferences.",
             symbolName: "gearshape.2", keywords: ["defaults", "hidden", "preferences", "tweaks"]),
+        ToolDescriptor(
+            id: "mac.wifi", category: .macUtilities,
+            title: "Wi-Fi Password", summary: "Show a saved Wi-Fi password and share it as a QR code.",
+            symbolName: "wifi", keywords: ["wifi", "wi-fi", "password", "network", "qr", "share"]),
+        ToolDescriptor(
+            id: "mac.permissions", category: .macUtilities,
+            title: "Reset Permissions", summary: "Reset the privacy permissions an app has been given or denied.",
+            symbolName: "hand.raised", keywords: ["permissions", "privacy", "tcc", "tccutil", "camera", "microphone", "screen recording", "reset"]),
     ]
 
-    // MARK: - Media (on-demand engines)
+    // MARK: - Media
 
     static let media: [ToolDescriptor] = [
+        ToolDescriptor(
+            id: "media.record-screen", category: .media,
+            title: "Record Screen", summary: "Record the whole screen, a window, or an app.",
+            symbolName: "record.circle", keywords: ["record", "screen", "recording", "capture", "video"]),
+        ToolDescriptor(
+            id: "media.record-audio", category: .media,
+            title: "Record Audio", summary: "Record sound from a microphone.",
+            symbolName: "mic", keywords: ["record", "audio", "microphone", "voice", "memo"]),
+        ToolDescriptor(
+            id: "media.trim-audio", category: .media,
+            title: "Trim Audio", summary: "Cut the start and end off an audio file.",
+            symbolName: "scissors", keywords: ["trim", "cut", "audio", "clip"]),
+        ToolDescriptor(
+            id: "media.frames", category: .media,
+            title: "Extract Frames", summary: "Save frames from a video as images.",
+            symbolName: "photo.stack", keywords: ["frames", "video", "stills", "thumbnails", "images"]),
         ToolDescriptor(
             id: "media.convert", category: .media,
             title: "Convert Video & Audio", summary: "Convert, compress, and trim media files.",

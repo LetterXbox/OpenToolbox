@@ -7,7 +7,6 @@ struct MenuBarMenu: View {
     @Environment(AppModel.self) private var model
     @Environment(UpdateCenter.self) private var updates
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         Button(L("Open OpenToolbox")) { model.showWindow() }
@@ -49,7 +48,7 @@ struct MenuBarMenu: View {
         .disabled(updates.isBusy)
         Button(L("Settings…")) {
             NSApp.activate()
-            openSettings()
+            openWindow(id: SettingsWindow.id)
         }
         .keyboardShortcut(",", modifiers: .command)
 

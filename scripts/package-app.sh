@@ -7,6 +7,10 @@ set -euo pipefail
 
 VERSION="${1:?usage: scripts/package-app.sh <version> [build-number]}"
 BUILD_NUMBER="${2:-1}"
+if ! [[ "$VERSION" =~ ^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}(-(alpha|beta|rc)\.[1-9][0-9]{0,3})?$ ]]; then
+    echo "error: version must look like 0.4.0, or 0.4.0-beta.1 for a test build (alpha, beta or rc)" >&2
+    exit 1
+fi
 BUNDLE_ID="io.github.letterxbox.OpenToolbox"
 MIN_MACOS="15.0"
 MIN_MACOS_PATTERN="${MIN_MACOS//./\\.}"
@@ -61,6 +65,18 @@ for arch in arm64 x86_64; do
     fi
 done
 
+# Frameworks that first shipped after the deployment target must be weakly linked, or the
+# app won't launch on older macOS.
+for framework in FoundationModels; do
+    for arch in arm64 x86_64; do
+        commands="$(otool -arch "$arch" -l "$APP/Contents/MacOS/OpenToolbox" | grep -B2 "/$framework.framework/" | grep ' cmd ' || true)"
+        if [ -n "$commands" ] && grep -qv 'LC_LOAD_WEAK_DYLIB' <<<"$commands"; then
+            echo "error: the $arch slice links $framework strongly; it must be weak for macOS $MIN_MACOS" >&2
+            exit 1
+        fi
+    done
+done
+
 # SwiftPM records the deployment target as the executable's SDK version, which makes
 # macOS draw the app in its old-SDK compatibility style. Record the SDK it was built with.
 vtool -set-build-version macos "$MIN_MACOS" "$SDK_VERSION" -replace \
@@ -106,6 +122,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSDownloadsFolderUsageDescription</key><string>OpenToolbox opens files you choose and writes results to the output folder you pick.</string>
     <key>NSRemovableVolumesUsageDescription</key><string>OpenToolbox opens files you choose on external drives.</string>
     <key>NSNetworkVolumesUsageDescription</key><string>OpenToolbox opens files you choose on network drives.</string>
+    <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoadsInWebContent</key><true/></dict>
+    <key>NSSpeechRecognitionUsageDescription</key><string>Transcribe turns speech in the files you choose into text on this Mac.</string>
+    <key>NSMicrophoneUsageDescription</key><string>Record Audio and Record Screen record from the microphone you choose.</string>
+    <key>NSLocationUsageDescription</key><string>Wi-Fi Password uses Location Services only to read the name of the Wi-Fi network this Mac is joined to.</string>
+    <key>NSLocationWhenInUseUsageDescription</key><string>Wi-Fi Password uses Location Services only to read the name of the Wi-Fi network this Mac is joined to.</string>
 </dict>
 </plist>
 PLIST

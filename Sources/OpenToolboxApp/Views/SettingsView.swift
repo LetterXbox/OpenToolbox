@@ -2,6 +2,19 @@ import AppKit
 import OpenToolboxCore
 import SwiftUI
 
+enum SettingsWindow {
+    static let id = "settings"
+}
+
+struct SettingsButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button(L("Settings…")) { openWindow(id: SettingsWindow.id) }
+            .keyboardShortcut(",", modifiers: .command)
+    }
+}
+
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(UpdateCenter.self) private var updates
@@ -40,7 +53,7 @@ struct SettingsView: View {
             UpdateSettingsSection(updates: updates)
         }
         .formStyle(.grouped)
-        .frame(width: 520)
+        .frame(minWidth: 460, idealWidth: 560, maxWidth: .infinity, minHeight: 320, idealHeight: 640, maxHeight: .infinity)
         .padding()
     }
 
@@ -108,6 +121,11 @@ private struct UpdateSettingsSection: View {
             Toggle(L("Download and install updates automatically"), isOn: $updates.installsAutomatically)
                 .disabled(!updates.checksAutomatically || !updates.canInstall)
             Text(L("When on, OpenToolbox asks GitHub once a day for the latest release. Nothing about you or your files is sent. Downloaded updates are checked against their published SHA-256 checksum and code signature, and install when you restart or quit."))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Toggle(L("Include test builds"), isOn: $updates.receivesTestBuilds)
+                .disabled(!updates.canCheck)
+            Text(L("Test builds are pre-releases for trying new features early, and may have more bugs. When the stable release they lead to comes out, OpenToolbox updates to it. Turning this off doesn't return you to an older stable version."))
                 .font(.callout)
                 .foregroundStyle(.secondary)
             if let reason = updates.unsupportedReason {

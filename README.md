@@ -5,7 +5,7 @@
 <h1 align="center">OpenToolbox</h1>
 
 <p align="center">
-  <strong>Everyday developer, text, image, PDF, and Mac utilities in one native macOS app.</strong>
+  <strong>Everyday developer, text, image, PDF, media, and Mac utilities in one native macOS app.</strong>
 </p>
 
 <p align="center">
@@ -17,18 +17,18 @@
 
 ---
 
-OpenToolbox brings 33 everyday utilities together in a single Swift and SwiftUI app for macOS 15+. Everything built in runs locally on your Mac using Apple frameworks, and file tools always write to a dedicated output folder so your originals stay untouched.
+OpenToolbox brings 51 everyday utilities together in a single Swift and SwiftUI app for macOS 15+. Everything built in runs locally on your Mac using Apple frameworks, and tools that export processed files write to a dedicated output folder so your originals stay untouched (except when you explicitly act on existing files, such as choosing **Rename in place** in Batch Rename, moving selected copies to Trash in Find Duplicates, or clearing the quarantine flag in Quarantine Helper).
 
 ## Why OpenToolbox
 
-- **Pure native macOS (macOS 15+):** Built with Swift, SwiftUI, and Apple frameworks (Vision, PDFKit, ImageIO)—no Electron, no web wrappers, and universal binaries for Apple silicon and Intel.
-- **Private and offline by default:** No accounts, no telemetry, and no file uploads. All processing happens on your Mac. OpenToolbox connects to the network only when you explicitly start an online action (downloading on-demand engines, running Network Speed Test, or checking for updates), plus an optional daily update check that is off by default.
-- **Originals stay untouched:** File tools write new, collision-safe files into `<output folder>/<yyyy-MM-dd>/<tool>/` rather than overwriting your source files.
+- **Pure native macOS (macOS 15+):** Built with Swift, SwiftUI, and Apple frameworks (Vision, PDFKit, ImageIO, AVFoundation, ScreenCaptureKit, Speech, Translation, and Foundation Models)—no Electron, no web wrappers, and universal binaries for Apple silicon and Intel.
+- **Private and offline by default:** No accounts, no telemetry, and no file uploads. All processing—including **Translate**, **Transcribe**, and **Summarize**—happens on your Mac. OpenToolbox connects to the network only when you explicitly start an online action: downloading on-demand engines, running **Network Speed Test**, checking for or downloading updates, loading a URL in **Web Page to PDF**, showing or searching the map in **Coordinate Picker** (Apple Maps), or clicking **Find Network Scanners** in **Scan Document**. You can also opt in to daily automatic update checks; a second opt-in lets OpenToolbox download an available update's disk image after a daily check without a further click and install it when you restart or quit (both are off by default). For **Translate** and (on macOS 26+) **Transcribe**, macOS may download an on-device language pack the first time you use a language.
+- **Originals stay untouched:** Tools that export processed copies write new, collision-safe files into `<output folder>/<yyyy-MM-dd>/<tool>/` rather than overwriting your source files. Actions that modify or remove existing files happen only when you explicitly choose them—such as **Batch Rename**'s **Rename in place** mode (which supports undo), **Find Duplicates** moving selected copies to Trash, and **Quarantine Helper** clearing a file's quarantine flag in place.
 - **On-demand external engines:** Built-in tools work out of the box with zero extra downloads. External CLI engines are never bundled; when available, they download only on request, are verified by SHA-256, shared across tools, and removable in one click.
 
 ## Highlights
 
-- **Fast navigation:** Browse tools in the sidebar, jump anywhere with **Quick Open (`⌘K`)**, and enable or disable tools in the **Engine Manager**.
+- **Fast navigation:** Browse tools in the sidebar, jump anywhere with **Quick Open** in the window toolbar (or press `⌘K`), enable or disable tools in the **Tool Catalog**, and manage on-demand engines in the **Engine Manager**.
 - **Tools keep their state:** Switching to another tool preserves your inputs and lets running work continue. Active tools show a spinner in the sidebar; when background work finishes out of view, a dot marks the tool and macOS posts a notification.
 - **Independent windows:** Each OpenToolbox window maintains its own tool state, selection, and Quick Open palette.
 - **Menu bar, global hotkey & login:** In **Settings → General**, you can enable a menu bar icon (keeping OpenToolbox running when the last window closes), trigger Quick Open from any app with `⌃⌥K`, and launch OpenToolbox at login. All three are off by default.
@@ -52,6 +52,8 @@ OpenToolbox brings 33 everyday utilities together in a single Swift and SwiftUI 
 | **Lorem Ipsum** | Generate placeholder text. |
 | **Password Generator** | Generate strong random passwords. |
 | **CSV ↔ JSON** | Convert between CSV and JSON. |
+| **Color Picker** | Pick a color anywhere on screen and copy it as hex, RGB, HSL, HSB, SwiftUI, or AppKit code. |
+| **Coordinate Picker** | Find a place on a map or enter coordinates, and copy latitude and longitude as decimal, DMS, or GeoJSON. |
 
 ### Text & Files
 
@@ -62,10 +64,14 @@ OpenToolbox brings 33 everyday utilities together in a single Swift and SwiftUI 
 | **QR Code** | Generate and read QR codes. |
 | **Batch Rename** | Rename many files with patterns, live previews, and undo. |
 | **Find Duplicates** | Find duplicate files by content and safely move selected copies to Trash. |
+| **Translate** | Translate text on-device with Apple Translation. |
+| **Text to Speech** | Read text aloud with any installed voice, or save it as an audio file. |
+| **Transcribe** | Turn speech in audio and video files into text or subtitles (SRT, WebVTT), on-device. |
+| **Summarize** | Summarize text and documents on-device with Apple Intelligence (macOS 26+ on Macs with Apple Intelligence). |
 
 ### Images & PDF
 
-Powered on-device by Apple's Vision, PDFKit, and ImageIO frameworks:
+Powered on-device by Apple's Vision, PDFKit, ImageIO, Image Capture, and WebKit frameworks:
 
 | Tool | Description |
 | --- | --- |
@@ -74,9 +80,15 @@ Powered on-device by Apple's Vision, PDFKit, and ImageIO frameworks:
 | **Remove Background** | Lift subjects from photos on-device. |
 | **Blur Faces** | Detect and blur faces on-device. |
 | **Extract Text (OCR)** | Recognize text in images and PDFs on-device. |
-| **Organize PDFs** | Merge, split, extract, reorder, and rotate PDF pages. |
+| **Organize PDFs** | Merge, split, extract, delete, reorder, and rotate PDF pages. |
 | **Images ↔ PDF** | Combine images into a PDF or export PDF pages as images. |
 | **Watermark** | Add a text or image watermark to images and PDFs (9 positions or tiled, adjustable size, opacity, and diagonal angle). PDF pages stay vector and text stays searchable. |
+| **Compress Images** | Make images smaller by lowering quality or size; copies that wouldn't be smaller are not saved. |
+| **Crop PDF** | Trim the margins of PDF pages with a live preview. |
+| **PDF Password** | Add a password to PDFs (with optional printing, copying, and editing restrictions) or remove one. |
+| **Fill & Flatten Forms** | Fill in PDF forms and save a filled or flattened copy. |
+| **Scan Document** | Scan pages from a scanner or a nearby iPhone or iPad (Continuity Camera) into a PDF. |
+| **Web Page to PDF** | Save a web page as A4 or US Letter pages, or as one long page. |
 
 ### Mac Utilities
 
@@ -89,14 +101,32 @@ Powered on-device by Apple's Vision, PDFKit, and ImageIO frameworks:
 | **Eject All Disks** | Eject every external and disk-image volume. |
 | **Quarantine Helper** | Inspect and clear the quarantine flag on downloaded files. |
 | **Hidden Settings** | Toggle documented hidden macOS preferences. |
+| **Wi-Fi Password** | Show a saved Wi-Fi password (after administrator authentication) and share it as a QR code. |
+| **Reset Permissions** | Reset the privacy permissions an app has been given or denied so macOS prompts again. |
 
-### Media (Coming Soon)
+### Media
 
-- **Convert Video & Audio** (`ffmpeg`) and **Download Video** (`yt-dlp`) appear in the app as **"Coming soon"** until verified, SHA-256-pinned engine builds are ready.
+| Tool | Description |
+| --- | --- |
+| **Record Screen** | Record the whole screen, a window, or an app, with optional Mac audio and microphone capture. |
+| **Record Audio** | Record sound from the microphone you choose to an AAC audio file. |
+| **Trim Audio** | Cut the start and end off an audio file (WAV, AIFF, and CAF keep their format and encoding; other formats save as AAC). |
+| **Extract Frames** | Save frames from videos as images: spread evenly, every few seconds, or at set times. |
+
+#### Planned (On-Demand Engines)
+
+- **Tool Catalog** lists **Convert Video & Audio** (`ffmpeg`) and **Download Video** (`yt-dlp`) as **Planned**, and **Engine Manager** lists their engines as **Coming soon**; neither tool can be enabled in v0.3.0.
 
 ## Install
 
-Requires **macOS 15 or later** (universal build for Apple silicon and Intel).
+Requires **macOS 15 or later** (universal build for Apple silicon and Intel; tested on Apple silicon only).
+
+Some tools have additional system or hardware requirements:
+
+- **Summarize** requires **macOS 26 or later** on a Mac with **Apple Intelligence** enabled.
+- **Transcribe** uses Apple's newer on-device speech engine on **macOS 26 or later** and the older on-device speech recognizer on earlier versions; the languages offered depend on the recognizer your macOS version uses.
+- **Record Audio** requires a connected microphone; you can pick any connected microphone or use the system default. If your saved microphone isn't connected, it falls back to the system default when macOS has one, or asks you to choose another microphone.
+- **Scan Document** requires a scanner supported by macOS Image Capture or a nearby iPhone or iPad (Continuity Camera via **File → Import from iPhone or iPad**).
 
 1. Download the latest `OpenToolbox-<version>-macOS-universal.dmg` from [Releases](https://github.com/LetterXbox/OpenToolbox/releases) and open it.
 2. Drag **OpenToolbox** into **Applications**.
@@ -116,12 +146,19 @@ Choose **OpenToolbox → Check for Updates…** to check GitHub Releases manuall
 - **Installing:** Updates replace the app when you restart or quit. While OpenToolbox is running in the menu bar, a ready update also appears as **Restart to Update**. If an install fails on quit, OpenToolbox reports why on the next launch.
 - **Read-only / translocated locations:** If OpenToolbox cannot write to its own folder or is running from a temporary location, the update window links to the GitHub release page instead.
 - **Immediate settings effect:** Turning on automatic checks triggers a check right away; turning off automatic download and install cancels any in-progress automatic download and discards an uninstalled automatic update.
+- **Test builds:** Turn on **Include test builds** in **Settings → Updates** to try GitHub pre-releases (such as `0.4.0-beta.1` or `0.3.0-rc.1`) early. It is off by default on full releases, and starts on in a test build until you change it. Test builds may have more bugs, and go through the same SHA-256, bundle-identifier, version, and code-signature checks as full releases. When it is on, each update check (manual **Check for Updates…**, or the daily automatic check if turned on) reads GitHub's list of recent releases and offers the highest newer version, full or test. A full release ranks above test builds of the same version (`0.3.0` over `0.3.0-rc.2`), while a test build for a later version (`0.4.0-beta.1`) ranks above `0.3.0` and is offered instead. Turning it off cancels any in-progress test-build download and discards an uninstalled test build, without returning you to an older full release—you stay on the test build until a newer full release comes out.
 
 ## Known Limitations
 
-- **Not notarized / ad-hoc signed:** Releases require **Open Anyway** on first launch (see [Install](#install)). Because the signature is ad-hoc, it proves the app bundle is intact rather than publisher identity; trust in an update rests on the GitHub release.
+- **Not notarized / ad-hoc signed:** Releases require **Open Anyway** on first launch (see [Install](#install)). Because the signature is ad-hoc, it proves the app bundle is intact rather than publisher identity; trust in an update rests on the GitHub release. After an update, macOS may also ask again for **Screen Recording**, **Microphone**, **Speech Recognition**, and **Location** permissions.
+- **Intel Macs not tested:** The release download includes Intel code, but releases are tested only on Macs with Apple silicon.
+- **Unsaved recordings:** If **Record Screen** or **Record Audio** can't save a recording to the output folder, it is kept in **Unsaved Recordings** inside the recorder, where both tools can save or discard it later. If saving to **Unsaved Recordings** also fails, the error shows where the recording is stored; copy it from there before closing the tool.
+- **PDF Password restrictions and removal:** Printing, copying, and editing restrictions are enforced only by PDF apps that respect them. Removing a password or restrictions requires the PDF's owner password (or its single password if one was used for both).
+- **Summarize and Transcribe system limits:** **Summarize** requires macOS 26 or later on a Mac with Apple Intelligence turned on. **Transcribe** uses Apple's newer speech engine on macOS 26 or later and the older on-device speech recognizer on earlier versions; the languages it offers depend on the recognizer your macOS version uses.
+- **Scan Document sources:** Works with scanners macOS supports through Image Capture, and with an iPhone or iPad through **File → Import from iPhone or iPad**.
+- **Web Page to PDF rendering:** Pages load without your browser cookies or logins, so pages behind a sign-in save as their sign-in page. Splitting a page into A4 or US Letter pages can cut a line of text across two pages.
 - **Closing windows during active jobs:** Closing a window stops a Network Speed Test, Disk Speed Test, or duplicate scan running in that window. File batches already under way (such as image conversion or watermarking) finish as long as OpenToolbox remains running; with the menu bar icon off, closing the last window quits the app.
-- **Watermark format limits:** Animated GIFs and multipage TIFFs are rejected. Watermarked PDFs keep vector graphics and searchable text, but links, form fields, comments, and outlines are not preserved as interactive elements.
+- **Image and Watermark format limits:** Animated GIFs and multipage TIFFs (images with several frames or pages) are refused by Watermark and Compress Images. Watermarked PDFs keep vector graphics and searchable text, but links, form fields, comments, and outlines are not preserved as interactive elements.
 - **Updates apply on restart/quit:** While OpenToolbox stays open in the menu bar, a downloaded update waits until you choose **Restart to Update** or quit.
 - **Multiple copies from one folder:** Running two copies of OpenToolbox from the same folder at once causes the later instance to remove a staged update prepared by the first; run **Check for Updates…** again to re-download it.
 - **Startup bundle swap race:** OpenToolbox records its on-disk app bundle at launch. If something replaces the app on disk at that exact moment, a subsequent update from that session replaces the new copy instead.
@@ -129,7 +166,7 @@ Choose **OpenToolbox → Check for Updates…** to check GitHub Releases manuall
 
 ## Building from Source
 
-Requires **macOS 15 or later** and **Xcode 16 or later** (Swift 6 toolchain).
+Requires **macOS 15 or later** and **Xcode 26 or later** (Swift 6 toolchain and macOS 26 SDK).
 
 ```sh
 swift build                 # build the core library and the app
@@ -159,7 +196,7 @@ Build artifacts are written to `.build/release-app/dist/`.
 
 - **Localization:** User-facing strings go through `L("…")` (app) or `coreLocalized("…")` (core) into `Localizable.xcstrings` catalogs, with English as the source language.
 - **Engines:** Manifests live in `EngineCatalog` with per-architecture HTTPS URLs, byte sizes, and SHA-256 checksums. Downloads stage, verify size and digest, then atomically move into `~/Library/Application Support/OpenToolbox/engines/<id>/`. Unpinned engines stay marked **"Coming soon"** and cannot be installed.
-- **Outputs:** File tools write to `<output folder>/<yyyy-MM-dd>/<tool>/` with collision-safe filenames and never overwrite originals.
+- **Outputs:** Tools that export processed files write to `<output folder>/<yyyy-MM-dd>/<tool>/` with collision-safe filenames and never overwrite originals; tools that act directly on existing files when explicitly requested include **Batch Rename** (when **Rename in place** is chosen), **Find Duplicates** (moving selected copies to Trash), and **Quarantine Helper** (clearing the quarantine extended attribute in place).
 
 ## Contributing
 

@@ -3,6 +3,20 @@ import Foundation
 import Observation
 import OpenToolboxCore
 
+protocol UpdateInstalling: Sendable {
+    func removeLeftovers(next installedApp: URL)
+    func removeStaleWork() async
+    func prepare(
+        _ update: AppUpdate, replacing installed: InstalledApp, progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> PreparedUpdate
+    func install(_ prepared: PreparedUpdate) throws
+    func discard(_ prepared: PreparedUpdate)
+}
+
+extension UpdateInstaller: UpdateInstalling {}
+
+typealias UpdateCheck = @Sendable (_ current: AppVersion, _ includingTestBuilds: Bool) async throws -> UpdateCheckResult
+
 @MainActor
 @Observable
 final class UpdateCenter {
@@ -49,33 +63,61 @@ final class UpdateCenter {
         }
     }
 
+    var receivesTestBuilds: Bool {
+        didSet {
+            guard receivesTestBuilds != oldValue else { return }
+            defaults.set(receivesTestBuilds, forKey: Self.testBuildsKey)
+            if receivesTestBuilds {
+                if case .upToDate = phase { phase = .idle }
+                if checksAutomatically { checkNow(userInitiated: false) }
+            } else {
+                dropTestBuild()
+            }
+        }
+    }
+
     let currentVersion: AppVersion?
     let unsupportedReason: String?
 
     private let defaults: UserDefaults
     private let appURL: URL
-    private let installer: UpdateInstaller?
+    private let installer: (any UpdateInstalling)?
+    private let check: UpdateCheck
     private var task: Task<Void, Never>?
     private var launchRecord: Task<InstalledApp?, Never>?
     private var timer: Timer?
 
     private static let checksKey = "UpdatesCheckAutomatically"
     private static let installsKey = "UpdatesInstallAutomatically"
+    private static let testBuildsKey = "UpdatesReceiveTestBuilds"
     private static let lastCheckedKey = "UpdatesLastChecked"
     private static let lastAutomaticAttemptKey = "UpdatesLastAutomaticAttempt"
     private static let installNoticeKey = "UpdatesInstallNotice"
     private static let interval: TimeInterval = 24 * 60 * 60
 
-    init(defaults: UserDefaults = .standard, bundle: Bundle = .main) {
+    static let liveCheck: UpdateCheck = { current, includingTestBuilds in
+        try await UpdateChecker(client: URLSessionUpdateClient(appVersion: current))
+            .check(current: current, includingTestBuilds: includingTestBuilds)
+    }
+
+    init(
+        defaults: UserDefaults = .standard,
+        bundle: Bundle = .main,
+        installer: (any UpdateInstalling)? = (try? UpdateInstaller.defaultWorkRoot()).map { UpdateInstaller(workRoot: $0) },
+        check: @escaping UpdateCheck = UpdateCenter.liveCheck
+    ) {
         self.defaults = defaults
+        self.check = check
         appURL = bundle.bundleURL
-        currentVersion = (bundle.infoDictionary?["CFBundleShortVersionString"] as? String).flatMap(AppVersion.init)
+        let version = (bundle.infoDictionary?["CFBundleShortVersionString"] as? String).flatMap(AppVersion.init)
+        currentVersion = version
         unsupportedReason = UpdateInstaller.unsupportedReason(for: bundle.bundleURL, bundleIdentifier: bundle.bundleIdentifier)
         checksAutomatically = defaults.bool(forKey: Self.checksKey)
         installsAutomatically = defaults.bool(forKey: Self.installsKey)
+        receivesTestBuilds = defaults.object(forKey: Self.testBuildsKey) as? Bool ?? version?.isPrerelease ?? false
         lastChecked = defaults.object(forKey: Self.lastCheckedKey) as? Date
         lastAutomaticAttempt = defaults.object(forKey: Self.lastAutomaticAttemptKey) as? Date
-        installer = (try? UpdateInstaller.defaultWorkRoot()).map { UpdateInstaller(workRoot: $0) }
+        self.installer = installer
 
         if unsupportedReason == nil { installer?.removeLeftovers(next: appURL) }
         let installer = installer
@@ -123,14 +165,21 @@ final class UpdateCenter {
         }
         if !userInitiated { recordAutomaticAttempt() }
         phase = .checking
+        let includingTestBuilds = receivesTestBuilds
+        let check = check
         task = Task {
             do {
-                let result = try await UpdateChecker(client: URLSessionUpdateClient(appVersion: currentVersion))
-                    .check(current: currentVersion)
+                let result = try await check(currentVersion, includingTestBuilds)
+                guard includingTestBuilds == receivesTestBuilds else {
+                    recheck(userInitiated: userInitiated)
+                    return
+                }
                 recordCheck()
                 switch result {
                 case .upToDate(let latest):
                     phase = .upToDate(max(latest, currentVersion))
+                case .available(let update) where !isWanted(update.version):
+                    phase = .idle
                 case .available(let update):
                     phase = .available(update)
                     if !userInitiated, installsAutomatically, canInstall {
@@ -140,6 +189,10 @@ final class UpdateCenter {
                     }
                 }
             } catch {
+                if !Task.isCancelled, includingTestBuilds != receivesTestBuilds {
+                    recheck(userInitiated: userInitiated)
+                    return
+                }
                 phase = userInitiated && !Task.isCancelled ? .failed(error.localizedDescription) : .idle
             }
         }
@@ -174,7 +227,8 @@ final class UpdateCenter {
     /// Installs a prepared update without reopening, used when the app quits.
     func installOnQuit() {
         task?.cancel()
-        guard case .ready(let prepared) = phase, let installer, !isAutomaticTransaction || installsAutomatically
+        guard case .ready(let prepared) = phase, let installer, !isAutomaticTransaction || installsAutomatically,
+            isWanted(prepared.version)
         else { return }
         do {
             try installer.install(prepared)
@@ -194,6 +248,37 @@ final class UpdateCenter {
             Date().timeIntervalSince(last) < Self.interval
         { return }
         checkNow(userInitiated: false)
+    }
+
+    private func recheck(userInitiated: Bool) {
+        phase = .idle
+        guard userInitiated || checksAutomatically else { return }
+        checkNow(userInitiated: userInitiated)
+    }
+
+    private func isWanted(_ version: AppVersion) -> Bool {
+        receivesTestBuilds || !version.isPrerelease
+    }
+
+    private func offer(_ update: AppUpdate) -> Phase {
+        isWanted(update.version) ? .available(update) : .idle
+    }
+
+    private func dropTestBuild() {
+        switch phase {
+        case .available(let update) where update.version.isPrerelease:
+            phase = .idle
+        case .downloading(let update, _) where update.version.isPrerelease:
+            task?.cancel()
+        case .ready(let prepared) where prepared.version.isPrerelease:
+            installer?.discard(prepared)
+            isAutomaticTransaction = false
+            phase = .idle
+        case .upToDate:
+            phase = .idle
+        default:
+            break
+        }
     }
 
     private func discardAutomaticUpdate() {
@@ -234,8 +319,8 @@ final class UpdateCenter {
         let launchRecord = launchRecord
         task = Task {
             guard let installed = await launchRecord?.value ?? nil else {
-                phase = automatic
-                    ? .available(update)
+                phase = automatic || !isWanted(update.version)
+                    ? offer(update)
                     : .failed(L("OpenToolbox couldn't read its own app bundle when it opened. Quit and reopen OpenToolbox, then try again."))
                 return
             }
@@ -243,16 +328,16 @@ final class UpdateCenter {
                 let prepared = try await installer.prepare(update, replacing: installed) { fraction in
                     Task { @MainActor in self.showProgress(fraction, for: update) }
                 }
-                guard !Task.isCancelled else {
+                guard !Task.isCancelled, isWanted(update.version) else {
                     installer.discard(prepared)
-                    phase = .available(update)
+                    phase = offer(update)
                     return
                 }
                 phase = .ready(prepared)
                 if automatic { windowRequest += 1 }
             } catch {
-                if Task.isCancelled || automatic {
-                    phase = .available(update)
+                if Task.isCancelled || automatic || !isWanted(update.version) {
+                    phase = offer(update)
                 } else {
                     phase = .failed(error.localizedDescription)
                 }

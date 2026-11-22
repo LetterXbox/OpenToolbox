@@ -301,6 +301,40 @@ struct EngineStoreTests {
         #expect(EngineManifest.isValidID(id))
     }
 
+    @Test func relativePathsSplitOnSlashBytes() {
+        #expect(EngineStore.relativePathComponents("a/\u{301}b".utf8) == ["a", "\u{301}b"])
+        #expect(EngineStore.relativePathComponents("\u{301}/x".utf8) == ["\u{301}", "x"])
+        #expect(EngineStore.relativePathComponents("a\u{301}/\u{301}b".utf8) == ["a\u{301}", "\u{301}b"])
+    }
+
+    @Test(arguments: ["", "/a", "a/", "a//b", "a/../\u{301}b", "a/./\u{301}b", "a/\0b", "a\\b"])
+    func relativePathsRejectInvalidComponents(_ path: String) {
+        #expect(EngineStore.relativePathComponents(path.utf8) == nil)
+    }
+
+    @Test(arguments: ["", ".", "..", "a/b", "a/\u{301}b", "\u{301}/x", "a\0b"])
+    func directoryPrimitivesRequireOneComponent(_ name: String) async throws {
+        try await withTemporaryDirectory { temporary in
+            let root = try EngineDirectory.openPath(temporary)
+            let directory = try root.makeDirectory("tested")
+            let device = try directory.metadata().st_dev
+            let file = try directory.createFile("source")
+            try file.close()
+            let invalid = POSIXError(.EINVAL)
+            #expect(throws: invalid) { try directory.directory(name) }
+            #expect(throws: invalid) { try directory.directory(name, create: true) }
+            #expect(throws: invalid) { try directory.makeDirectory(name) }
+            #expect(throws: invalid) { try directory.metadata(name) }
+            #expect(throws: invalid) { try directory.regularFile(name) }
+            #expect(throws: invalid) { try directory.createFile(name) }
+            #expect(throws: invalid) { try directory.removeTree(name, device: device) }
+            #expect(throws: invalid) { try directory.rename(name, to: directory, as: "target", flags: 0) }
+            #expect(throws: invalid) { try directory.rename("source", to: directory, as: name, flags: 0) }
+            let entries = try FileManager.default.contentsOfDirectory(atPath: temporary.appending(path: "tested").path)
+            #expect(entries == ["source"])
+        }
+    }
+
     static func zipFixture(in directory: URL, outwardLink: Bool = false, extraEntries: Int = 0)
         throws -> (EngineStore, EngineManifest, Data)
     {
@@ -316,21 +350,107 @@ struct EngineStoreTests {
         if outwardLink {
             try fm.createSymbolicLink(atPath: source.appending(path: "outside").path, withDestinationPath: "../outside")
         }
+        let archive = try Self.makeZIP(in: directory, from: source, options: ["-r", "-y"], entries: ["."])
+        let (store, manifest) = try Self.storeForZIP(archive, in: directory, executablePath: "bin/demo")
+        return (store, manifest, contents)
+    }
+
+    private static func makeZIP(in directory: URL, from source: URL, options: [String], entries: [String]) throws -> URL {
         let archive = directory.appending(path: "fixture.zip")
         let zip = Process()
         zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
         zip.currentDirectoryURL = source
-        zip.arguments = ["-q", "-r", "-y", archive.path, "."]
+        zip.arguments = ["-q"] + options + [archive.path] + entries
         try zip.run()
         zip.waitUntilExit()
         try #require(zip.terminationStatus == 0)
+        return archive
+    }
+
+    private static func storeForZIP(_ archive: URL, in directory: URL, executablePath: String)
+        throws -> (EngineStore, EngineManifest)
+    {
         let manifest = Self.manifest(
             sha256: try HashGenerator.hashFile(at: archive, algorithm: .sha256),
             size: Int64(try Data(contentsOf: archive).count),
-            payload: .zip(executablePath: "bin/demo"))
+            payload: .zip(executablePath: executablePath))
         let store = EngineStore(rootDirectory: directory.appending(path: "engines"),
                                 downloader: LocalFileDownloader(files: [Self.url: archive]))
-        return (store, manifest, contents)
+        return (store, manifest)
+    }
+
+    @Test(arguments: ["a/\u{301}b", "\u{301}/x", "a\u{301}/\u{301}b"])
+    func installsRealZIPWithCombiningMarksNearSlashes(_ path: String) async throws {
+        try await withTemporaryDirectory { directory in
+            let source = directory.appending(path: "source")
+            let file = source.appending(path: path)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Self.payload.write(to: file)
+            // Archive just the file so the extractor has to create its parent from the entry name.
+            let archive = try Self.makeZIP(in: directory, from: source, options: ["-0"], entries: [path])
+            let (store, manifest) = try Self.storeForZIP(archive, in: directory, executablePath: path)
+            try await store.install(manifest)
+            let executable = try #require(store.executableURL(for: manifest))
+            let contents = try Data(contentsOf: executable)
+            #expect(contents == Self.payload)
+            #expect(FileManager.default.isExecutableFile(atPath: executable.path))
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func realZIPWithInvalidCRCDiscardsStagedWrites(deflated: Bool) async throws {
+        try await withTemporaryDirectory { directory in
+            let payload = Data(repeating: 42, count: 160_000)
+            try payload.write(to: directory.appending(path: "demo"))
+            let archive = try Self.makeZIP(in: directory, from: directory, options: [deflated ? "-9" : "-0"], entries: ["demo"])
+            var bytes = try Data(contentsOf: archive)
+            if deflated {
+                // Both headers claim the same CRC, but the decoded bytes have a different CRC.
+                try #require(bytes[8] == 8)
+                let central = try #require(bytes.range(of: Data([0x50, 0x4b, 0x01, 0x02])))
+                bytes[14] ^= 1 // Local header CRC.
+                bytes[central.lowerBound + 16] ^= 1 // Central header CRC.
+            } else {
+                // Corrupt a stored payload byte without altering either header.
+                let member = try #require(bytes.range(of: payload))
+                bytes[member.lowerBound] ^= 1
+            }
+            try bytes.write(to: archive)
+            let (store, manifest) = try Self.storeForZIP(archive, in: directory, executablePath: "demo")
+            var wroteChunk = false
+            do {
+                try await store.install(manifest, progress: { _ in }) { checkpoint in
+                    if checkpoint == .didExtractChunk { wroteChunk = true }
+                }
+                Issue.record("Expected the ZIP member CRC mismatch to fail installation")
+            } catch let error as EngineStoreError {
+                #expect(error == .invalidArchive)
+            }
+            #expect(wroteChunk)
+            let engine = store.rootDirectory.appending(path: manifest.id)
+            #expect(!FileManager.default.fileExists(atPath: engine.path))
+            let staging = store.rootDirectory.appending(path: ".staging")
+            let leftovers = try FileManager.default.contentsOfDirectory(atPath: staging.path)
+            #expect(leftovers.isEmpty)
+        }
+    }
+
+    @Test func rejectsZIPWithDataDescriptorFlagBeforeExtraction() async throws {
+        try await withTemporaryDirectory { directory in
+            try Self.payload.write(to: directory.appending(path: "demo"))
+            let archive = try Self.makeZIP(in: directory, from: directory, options: ["-0"], entries: ["demo"])
+            var bytes = try Data(contentsOf: archive)
+            let central = try #require(bytes.range(of: Data([0x50, 0x4b, 0x01, 0x02])))
+            bytes[6] |= 0x08 // Local flags.
+            bytes[central.lowerBound + 8] |= 0x08 // Central flags.
+            try bytes.write(to: archive)
+            let (store, manifest) = try Self.storeForZIP(archive, in: directory, executablePath: "demo")
+            await #expect(throws: EngineStoreError.invalidArchive) {
+                try await store.install(manifest, progress: { _ in }) { checkpoint in
+                    #expect(checkpoint != .didExtractChunk)
+                }
+            }
+        }
     }
 
     @Test func installsStoredAndDeflatedFilesFromRealZIP() async throws {

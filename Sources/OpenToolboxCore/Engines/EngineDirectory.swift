@@ -14,16 +14,14 @@ final class EngineDirectory: Sendable {
     deinit { _ = close(self.fd) }
 
     static func openPath(_ url: URL, create: Bool = false) throws -> EngineDirectory {
-        let components = url.path.split(separator: "/")
-        guard url.isFileURL, url.path.hasPrefix("/"), !components.isEmpty else {
+        let path = url.path.utf8
+        let components = path.split(separator: 0x2f)
+        guard url.isFileURL, path.first == 0x2f, !components.isEmpty else {
             throw POSIXError(.EINVAL)
         }
         var directory = try EngineDirectory(open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC))
         for component in components {
-            guard component != ".", component != "..", !component.utf8.contains(0) else {
-                throw POSIXError(.EINVAL)
-            }
-            directory = try directory.directory(String(component), create: create)
+            directory = try directory.directory(String(decoding: component, as: UTF8.self), create: create)
         }
         try directory.requireOwner()
         return directory
@@ -38,7 +36,16 @@ final class EngineDirectory: Sendable {
         return URL(fileURLWithPath: canonicalPath, isDirectory: true)
     }
 
+    static func isSingleComponent(_ name: String) -> Bool {
+        !name.isEmpty && name != "." && name != ".." && !name.utf8.contains { $0 == 0 || $0 == 0x2f }
+    }
+
+    private static func requireSingleComponent(_ name: String) throws {
+        guard Self.isSingleComponent(name) else { throw POSIXError(.EINVAL) }
+    }
+
     func directory(_ name: String, create: Bool = false) throws -> EngineDirectory {
+        try Self.requireSingleComponent(name)
         if create, mkdirat(self.fd, name, 0o700) != 0, errno != EEXIST {
             throw Self.posixError()
         }
@@ -46,11 +53,13 @@ final class EngineDirectory: Sendable {
     }
 
     func makeDirectory(_ name: String) throws -> EngineDirectory {
+        try Self.requireSingleComponent(name)
         guard mkdirat(self.fd, name, 0o700) == 0 else { throw Self.posixError() }
         return try self.directory(name)
     }
 
     func metadata(_ name: String) throws -> stat? {
+        try Self.requireSingleComponent(name)
         var info = stat()
         if fstatat(self.fd, name, &info, AT_SYMLINK_NOFOLLOW) == 0 { return info }
         if errno == ENOENT { return nil }
@@ -80,6 +89,7 @@ final class EngineDirectory: Sendable {
     }
 
     func regularFile(_ name: String, flags: Int32 = O_RDONLY) throws -> FileHandle {
+        try Self.requireSingleComponent(name)
         let descriptor = openat(self.fd, name, flags | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { throw Self.posixError() }
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
@@ -107,12 +117,15 @@ final class EngineDirectory: Sendable {
     }
 
     func rename(_ name: String, to destination: EngineDirectory, as newName: String, flags: UInt32) throws {
+        try Self.requireSingleComponent(name)
+        try Self.requireSingleComponent(newName)
         guard renameatx_np(self.fd, name, destination.fd, newName, flags) == 0 else {
             throw Self.posixError()
         }
     }
 
     func removeTree(_ name: String, device: dev_t, depth: Int = 0) throws {
+        try Self.requireSingleComponent(name)
         guard depth <= 64 else { throw POSIXError(.ELOOP) }
         guard let info = try self.metadata(name) else { return }
         if Self.type(of: info) == S_IFDIR {
@@ -150,7 +163,7 @@ final class EngineDirectory: Sendable {
             }
             let length = Int(entry.pointee.d_namlen)
             let name = withUnsafeBytes(of: &entry.pointee.d_name) { buffer in
-                String(bytes: buffer.prefix(length), encoding: .utf8)
+                String(validating: buffer.prefix(length), as: UTF8.self)
             }
             guard let name else { throw POSIXError(.EILSEQ) }
             if name != ".", name != ".." { try body(name) }

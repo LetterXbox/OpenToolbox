@@ -164,7 +164,7 @@ struct ImageProcessorTests {
         #expect(ImageProcessor.isIPTCLocationKey(kCGImagePropertyIPTCContentLocationName))
         #expect(!ImageProcessor.isIPTCLocationKey(kCGImagePropertyIPTCCaptionAbstract))
         #expect(!ImageProcessor.isIPTCLocationKey(kCGImagePropertyIPTCKeywords))
-        #expect(!ImageProcessor.isIPTCLocationKey(kCGImagePropertyIPTCContactInfo))
+        #expect(!ImageProcessor.isIPTCLocationKey(kCGImagePropertyIPTCCreatorContactInfo))
     }
 
     @Test func keepFormatUsesTheRealTypeNotTheFileName() async throws {

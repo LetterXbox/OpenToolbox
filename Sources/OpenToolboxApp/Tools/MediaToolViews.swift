@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import OpenToolboxCore
 import ScreenCaptureKit
 import SwiftUI
@@ -363,8 +364,9 @@ enum RecordingSessions {
     @MainActor static var isRecording: Bool { !ScreenRecorder.active.isEmpty || !AudioRecorder.active.isEmpty }
 
     @MainActor static func stopAll() async -> Bool {
-        AudioRecorder.stopAll()
-        return await ScreenRecorder.stopAll()
+        async let audio = AudioRecorder.stopAll()
+        let screen = await ScreenRecorder.stopAll()
+        return await audio && screen
     }
 }
 
@@ -429,116 +431,239 @@ struct RecordScreenView: View {
 }
 
 
+struct Microphone: Identifiable, Hashable {
+    let id: String
+    let name: String
+
+    init(_ device: AVCaptureDevice) {
+        id = device.uniqueID
+        name = device.localizedName
+    }
+
+    init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
 @MainActor
 @Observable
-final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
-    var since: Date?
-    var isRequestingAccess = false
+final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
+    enum Phase: Equatable {
+        case idle
+        case starting
+        case recording(since: Date)
+        case finishing
+    }
+
+    static let microphoneKey = "RecordAudioMicrophone"
+
+    var phase: Phase = .idle
     var level: Float = 0
     var failure: String?
     var saved: URL?
+    var microphones: [Microphone] = []
+    var defaultMicrophone: Microphone?
+    var chosenMicrophone: String? {
+        didSet { defaults.set(chosenMicrophone, forKey: Self.microphoneKey) }
+    }
+
+    @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var destination: (output: OutputDirectory, tool: ToolID)?
     fileprivate static var active: Set<AudioRecorder> = []
 
-    @ObservationIgnored private var recorder: AVAudioRecorder?
+    @ObservationIgnored private var session: AVCaptureSession?
+    @ObservationIgnored private var audioOutput: AVCaptureAudioFileOutput?
     @ObservationIgnored private var temporary: URL?
     @ObservationIgnored private var meterTask: Task<Void, Never>?
 
-    var isRecording: Bool { since != nil }
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        chosenMicrophone = defaults.string(forKey: Self.microphoneKey)
+        super.init()
+        refreshMicrophones()
+    }
 
-    var inputName: String? { AVCaptureDevice.default(for: .audio)?.localizedName }
+    var isBusy: Bool { phase != .idle }
+
+    var since: Date? {
+        if case .recording(let since) = phase { since } else { nil }
+    }
+
+    var selection: String? {
+        get { MicrophoneChoice.selection(chosen: chosenMicrophone, connected: microphones.map(\.id)) }
+        set { chosenMicrophone = newValue }
+    }
+
+    var isChosenMicrophoneMissing: Bool { chosenMicrophone != nil && selection == nil }
+
+    func refreshMicrophones() {
+        let discovery = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified)
+        microphones = discovery.devices.map(Microphone.init)
+        defaultMicrophone = AVCaptureDevice.default(for: .audio).map(Microphone.init)
+    }
 
     func requestStart(output: OutputDirectory, tool: ToolID) {
+        guard phase == .idle else { return }
+        failure = nil
+        saved = nil
+        phase = .starting
         let generation = self.generation
         Task { await start(generation, output: output, tool: tool) }
     }
 
     private func start(_ requested: Int, output: OutputDirectory, tool: ToolID) async {
-        guard requested == generation, !isRequestingAccess, !isRecording else { return }
-        failure = nil
-        saved = nil
-        isRequestingAccess = true
         let granted = await AVAudioApplication.requestRecordPermission()
-        isRequestingAccess = false
-        guard requested == generation else { return }
-        guard granted else {
-            failure = L("Allow OpenToolbox in System Settings → Privacy & Security → Microphone to record.")
+        guard requested == generation else {
+            phase = .idle
             return
         }
+        guard granted else {
+            failure = L("Allow OpenToolbox in System Settings → Privacy & Security → Microphone to record.")
+            phase = .idle
+            return
+        }
+        refreshMicrophones()
+        guard
+            let id = MicrophoneChoice.device(
+                chosen: chosenMicrophone, connected: microphones.map(\.id), systemDefault: defaultMicrophone?.id),
+            let device = AVCaptureDevice(uniqueID: id)
+        else {
+            failure = L("No microphone found. Connect one, or choose an input in System Settings → Sound.")
+            phase = .idle
+            return
+        }
+        let session = AVCaptureSession()
+        let fileOutput = AVCaptureAudioFileOutput()
+        fileOutput.audioSettings = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 1,
+        ]
         do {
-            let url = try temporaryFile(named: "recording.m4a")
-            let settings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 1,
-                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-            ]
-            let recorder = try AVAudioRecorder(url: url, settings: settings)
-            recorder.delegate = self
-            recorder.isMeteringEnabled = true
-            guard recorder.record() else {
-                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            let input = try AVCaptureDeviceInput(device: device)
+            guard session.canAddInput(input), session.canAddOutput(fileOutput) else {
                 failure = L("Recording couldn't start. Check that a microphone is connected.")
+                phase = .idle
                 return
             }
-            self.recorder = recorder
-            temporary = url
-            destination = (output, tool)
-            Self.active.insert(self)
-            since = Date()
-            meterTask = Task { [weak self] in
-                while !Task.isCancelled {
-                    self?.updateLevel()
-                    try? await Task.sleep(for: .milliseconds(100))
-                }
-            }
+            session.addInput(input)
+            session.addOutput(fileOutput)
         } catch {
             failure = error.localizedDescription
+            phase = .idle
+            return
+        }
+        let handoff = Handoff(value: session)
+        await Task.detached { handoff.value.startRunning() }.value
+        guard requested == generation, session.isRunning else {
+            if requested == generation {
+                failure = L("Recording couldn't start. Check that a microphone is connected.")
+            }
+            Self.stopRunning(session)
+            phase = .idle
+            return
+        }
+        let url: URL
+        do {
+            url = try temporaryFile(named: "recording.m4a")
+        } catch {
+            failure = error.localizedDescription
+            Self.stopRunning(session)
+            phase = .idle
+            return
+        }
+        self.session = session
+        audioOutput = fileOutput
+        temporary = url
+        destination = (output, tool)
+        Self.active.insert(self)
+        fileOutput.startRecording(to: url, outputFileType: .m4a, recordingDelegate: self)
+        phase = .recording(since: Date())
+        meterTask = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.updateLevel()
+                try? await Task.sleep(for: .milliseconds(100))
+            }
         }
     }
 
     private func updateLevel() {
-        guard let recorder else { return }
-        recorder.updateMeters()
-        let power = recorder.averagePower(forChannel: 0)
+        guard let channels = audioOutput?.connections.first?.audioChannels, !channels.isEmpty else { return }
+        let power = channels.map(\.averagePowerLevel).max() ?? -60
         level = max(0, min(1, (power + 60) / 60))
     }
 
-    func close(output: OutputDirectory, tool: ToolID) {
+    func close() {
         generation += 1
-        if isRecording { stop(output: output, tool: tool) }
+        stop()
     }
 
-    static func stopAll() {
-        for recorder in active {
-            guard let destination = recorder.destination else { continue }
-            recorder.stop(output: destination.output, tool: destination.tool)
+    func stop() {
+        guard case .recording = phase, let audioOutput else { return }
+        phase = .finishing
+        meterTask?.cancel()
+        meterTask = nil
+        level = 0
+        audioOutput.stopRecording()
+    }
+
+    private func finish(problem: String?) {
+        defer { reset() }
+        guard let temporary, let destination else { return }
+        let size = (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard size > 0 else {
+            try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent())
+            failure = problem.map { L("Recording failed: \($0)") } ?? L("Nothing was recorded.")
+            return
+        }
+        let result = saveRecording(
+            temporary, named: recordingName("Recording", extension: "m4a"), output: destination.output,
+            tool: destination.tool)
+        saved = result.saved
+        if let message = result.failure {
+            failure = [problem, message].compactMap { $0 }.joined(separator: " ")
+        } else if let problem {
+            failure = L("Recording stopped early: \(problem) What was recorded was saved.")
         }
     }
 
-    func stop(output: OutputDirectory, tool: ToolID) {
-        guard let recorder, let temporary else { return }
-        recorder.stop()
+    private func reset() {
+        if let session { Self.stopRunning(session) }
+        session = nil
+        audioOutput = nil
+        temporary = nil
+        destination = nil
         meterTask?.cancel()
         meterTask = nil
-        self.recorder = nil
-        self.temporary = nil
-        Self.active.remove(self)
-        since = nil
         level = 0
-        let result = saveRecording(
-            temporary, named: recordingName("Recording", extension: "m4a"), output: output, tool: tool)
-        saved = result.saved
-        if let message = result.failure { failure = message }
+        phase = .idle
+        Self.active.remove(self)
     }
 
-    nonisolated func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
-        let source = ObjectIdentifier(recorder)
-        let message = error?.localizedDescription ?? L("Recording stopped because of an error.")
+    private static func stopRunning(_ session: AVCaptureSession) {
+        let handoff = Handoff(value: session)
+        Task.detached { handoff.value.stopRunning() }
+    }
+
+    static func stopAll() async -> Bool {
+        for recorder in Array(active) { recorder.close() }
+        let deadline = Date().addingTimeInterval(10)
+        while !active.isEmpty, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        return active.isEmpty
+    }
+
+    nonisolated func fileOutput(
+        _ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection],
+        error: Error?
+    ) {
+        let source = ObjectIdentifier(output)
+        let problem = error?.localizedDescription
         Task { @MainActor in
-            guard let current = self.recorder, ObjectIdentifier(current) == source, let destination = self.destination
-            else { return }
-            self.stop(output: destination.output, tool: destination.tool)
-            self.failure = [message, self.failure].compactMap { $0 }.joined(separator: " ")
+            guard let current = self.audioOutput, ObjectIdentifier(current) == source else { return }
+            self.finish(problem: problem)
         }
     }
 }
@@ -548,34 +673,59 @@ struct RecordAudioView: View {
     let tool: ToolDescriptor
     @State private var recorder = AudioRecorder()
 
+    private var deviceChanges: some Publisher<Notification, Never> {
+        let center = NotificationCenter.default
+        return center.publisher(for: AVCaptureDevice.wasConnectedNotification)
+            .merge(with: center.publisher(for: AVCaptureDevice.wasDisconnectedNotification))
+            .merge(with: center.publisher(for: NSApplication.didBecomeActiveNotification))
+            .receive(on: DispatchQueue.main)
+    }
+
     var body: some View {
+        @Bindable var recorder = recorder
         ToolPage(tool: tool) {
-            if let name = recorder.inputName {
-                LabeledContent(L("Microphone"), value: name)
-                    .frame(maxWidth: 480)
-            } else {
+            if recorder.microphones.isEmpty {
                 Text(L("No microphone found. Connect one, or choose an input in System Settings → Sound."))
                     .foregroundStyle(.secondary)
+            } else {
+                Picker(L("Microphone"), selection: $recorder.selection) {
+                    Text(recorder.defaultMicrophone.map { L("System Default (\($0.name))") } ?? L("System Default"))
+                        .tag(String?.none)
+                    Divider()
+                    ForEach(recorder.microphones) { microphone in
+                        Text(microphone.name).tag(String?.some(microphone.id))
+                    }
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+                .disabled(recorder.isBusy)
+                if recorder.isChosenMicrophoneMissing {
+                    Text(L("The microphone you chose isn't connected, so the system default is used."))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             }
             HStack(spacing: 14) {
-                if let since = recorder.since {
-                    Button(L("Stop and Save"), systemImage: "stop.fill") {
-                        recorder.stop(output: model.outputDirectory, tool: tool.id)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    ElapsedText(since: since)
-                    ProgressView(value: Double(recorder.level))
-                        .frame(width: 160)
-                } else {
+                switch recorder.phase {
+                case .idle, .starting:
                     Button(L("Record"), systemImage: "record.circle") {
                         recorder.requestStart(output: model.outputDirectory, tool: tool.id)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(recorder.isRequestingAccess)
+                    .disabled(recorder.phase == .starting)
+                case .recording(let since):
+                    Button(L("Stop and Save"), systemImage: "stop.fill", action: recorder.stop)
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                    ElapsedText(since: since)
+                    ProgressView(value: Double(recorder.level))
+                        .frame(width: 160)
+                case .finishing:
+                    ProgressView().controlSize(.small)
+                    Text(L("Saving…")).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if let saved = recorder.saved, !recorder.isRecording {
+                if let saved = recorder.saved, recorder.phase == .idle {
                     Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([saved]) }
                 }
             }
@@ -585,8 +735,9 @@ struct RecordAudioView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
-        .onDisappear { recorder.close(output: model.outputDirectory, tool: tool.id) }
-        .reportsActivity(recorder.isRecording)
+        .onReceive(deviceChanges) { _ in recorder.refreshMicrophones() }
+        .onDisappear { recorder.close() }
+        .reportsActivity(recorder.isBusy)
     }
 }
 

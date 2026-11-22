@@ -182,3 +182,17 @@ public enum AudioTrimmer {
         }
     }
 }
+
+/// Chooses the microphone to record from, by device ID.
+public enum MicrophoneChoice {
+    /// The chosen microphone while it's connected, or `nil` for the system default.
+    public static func selection(chosen: String?, connected: [String]) -> String? {
+        guard let chosen, connected.contains(chosen) else { return nil }
+        return chosen
+    }
+
+    /// The microphone to record from: the chosen one while it's connected, otherwise the system default.
+    public static func device(chosen: String?, connected: [String], systemDefault: String?) -> String? {
+        selection(chosen: chosen, connected: connected) ?? systemDefault ?? connected.first
+    }
+}

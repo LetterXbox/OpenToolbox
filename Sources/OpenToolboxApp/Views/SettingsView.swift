@@ -40,7 +40,7 @@ struct SettingsView: View {
             UpdateSettingsSection(updates: updates)
         }
         .formStyle(.grouped)
-        .frame(width: 520)
+        .frame(minWidth: 460, idealWidth: 560, maxWidth: .infinity, minHeight: 320, idealHeight: 640, maxHeight: .infinity)
         .padding()
     }
 

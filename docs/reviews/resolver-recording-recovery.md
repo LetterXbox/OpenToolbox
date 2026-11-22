@@ -1,6 +1,6 @@
-# Escalation: recording recovery and microphone start (v0.3.0)
+# Escalations: recording recovery, microphone start and kept-file replacement (v0.3.0)
 
-Two findings from the v0.3.0 release review failed two reviewed fix attempts. Each was judged independently by Claude Fable 5.2 and Gemini 4 Carbon against the project's bar for "critical", and Astra then confirmed the result.
+Three findings from the v0.3.0 release review failed two reviewed fix attempts. Each was judged independently by Claude Fable 5.2 and Gemini 4 Carbon against the project's bar for "critical", and Astra then confirmed the result.
 
 ## A. Recording recovery (round-1 #1, blocker)
 
@@ -29,3 +29,19 @@ Two findings from the v0.3.0 release review failed two reviewed fix attempts. Ea
 **Fable and Carbon: not critical.** The user pressed Record and allowed the microphone. The recording is visible, indicated by macOS and stoppable, and there's no network use or data loss.
 
 **Decision: fixed** in `0078095` with a per-start generation token, which is captured when Record is pressed and invalidated on close. **Astra (round 4): resolved.**
+
+## C. A kept recording replaced by another file (round-3 finding, continued in rounds 4 and 5)
+
+| Round | Commit reviewed | Result |
+| --- | --- | --- |
+| 3 | `55230dd` | Raised: Unsaved Recordings listed any entry, so Discard could delete a folder a user put there. |
+| 4 | `0078095` (attempt 1, `807f001`) | Partial: a linked tool folder, or a listed entry later replaced by a folder, could still be deleted. |
+| 5 | `2939e27` (attempt 2) | Linked folder resolved. Partial: a different regular file swapped in between the identity check and the open or unlink could be copied or removed. |
+
+**Fable: not critical.** "The app cannot race itself. Every caller ... runs on the main actor ... The race gives an attacker nothing new. The app is not sandboxed, so any process able to make the swap can already delete or replace those files ... The blast radius is bounded: one regular file, inside OpenToolbox's own recovery folder, under a name OpenToolbox generated." It recommended checking the opened descriptor before copying.
+
+**Carbon: not critical.** "No realistic concurrent writer exists for that path ... any process able to race inside it already runs as the same user with direct write/unlink access there." Residual risk: the microsecond gap between `fstatat` and `unlinkat`.
+
+**Astra (round 6): confirmed not critical, and the unlink gap may stay open past the v0.3.0 gate.** The read gap is closed by `e5c4c5d`, which checks the opened descriptor's type, device and inode before copying.
+
+**Decision:** the read gap is fixed. Deferred: move the entry into private same-volume staging, verify it there, and only then unlink it, for both Discard and cleanup after Save.

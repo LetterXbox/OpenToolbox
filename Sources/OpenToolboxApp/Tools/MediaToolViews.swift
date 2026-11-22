@@ -138,6 +138,7 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
     var capturesMicrophone = false
     var failure: String?
     var saved: URL?
+    var isSlowToFinish = false
 
     fileprivate static var active: Set<ScreenRecorder> = []
     @ObservationIgnored private var closeRequested = false
@@ -197,9 +198,7 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
         let session = self.session
         Task {
             try? await Task.sleep(for: .seconds(30))
-            if self.session == session, self.phase == .finishing {
-                self.failure = L("macOS is still finishing the recording. It will be saved when macOS is done.")
-            }
+            if self.session == session, self.phase == .finishing { self.isSlowToFinish = true }
         }
     }
 
@@ -279,6 +278,7 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
 
     private func reset() {
         session += 1
+        isSlowToFinish = false
         stream = nil
         recording = nil
         temporary = nil
@@ -405,7 +405,12 @@ struct RecordScreenView: View {
                     Text(L("Starting…")).foregroundStyle(.secondary)
                 case .finishing:
                     ProgressView().controlSize(.small)
-                    Text(L("Saving…")).foregroundStyle(.secondary)
+                    Text(
+                        recorder.isSlowToFinish
+                            ? L("macOS is still finishing the recording. It will be saved when macOS is done.")
+                            : L("Saving…")
+                    )
+                    .foregroundStyle(.secondary)
                 }
                 Spacer()
                 if let saved = recorder.saved, recorder.phase == .idle {

@@ -38,6 +38,14 @@ public enum DiskSpeedError: Error, Equatable, LocalizedError {
     }
 }
 
+/// What identifies a mounted volume: its file system ID, its volume UUID when it has one, and its size.
+/// A different drive mounted at the same path differs in at least one of them.
+public struct VolumeIdentity: Hashable, Sendable {
+    public let fileSystemID: UInt64
+    public let uuid: String?
+    public let totalBytes: Int64
+}
+
 /// A mounted volume that can be speed-tested.
 public struct SpeedTestVolume: Identifiable, Hashable, Sendable {
     public let name: String
@@ -46,8 +54,7 @@ public struct SpeedTestVolume: Identifiable, Hashable, Sendable {
     public let testDirectory: URL
     public let isReadOnly: Bool
     public let availableBytes: Int64?
-    /// Identifies the mounted file system, so a different drive mounted at the same path is not tested.
-    public let fileSystemID: UInt64
+    public let identity: VolumeIdentity
 
     public var id: URL { mountPoint }
 
@@ -64,14 +71,14 @@ public struct SpeedTestVolume: Identifiable, Hashable, Sendable {
             // The startup disk's root is the sealed, read-only system volume; its data volume holds the temporary folder.
             let isStartup = url.path == "/"
             let directory = isStartup ? FileManager.default.temporaryDirectory : url
-            guard let fileSystemID = DiskSpeedTest.fileSystemID(of: directory) else { return nil }
+            guard let identity = DiskSpeedTest.identity(of: directory) else { return nil }
             let isReadOnly = isStartup
                 ? (try? directory.resourceValues(forKeys: [.volumeIsReadOnlyKey]))?.volumeIsReadOnly ?? false
                 : values.volumeIsReadOnly ?? false
             return SpeedTestVolume(
                 name: values.volumeLocalizedName ?? values.volumeName ?? url.lastPathComponent,
                 mountPoint: url, testDirectory: directory, isReadOnly: isReadOnly,
-                availableBytes: DiskSpeedTest.availableBytes(at: directory), fileSystemID: fileSystemID)
+                availableBytes: DiskSpeedTest.availableBytes(at: directory), identity: identity)
         }
         return volumes.sorted { lhs, rhs in
             if lhs.mountPoint.path == "/" { return true }
@@ -109,15 +116,20 @@ public enum DiskSpeedTest {
         return Int64(stats.f_bavail) * Int64(stats.f_bsize)
     }
 
-    /// The mounted file system's identifier (`f_fsid`), which changes when a different drive is mounted.
-    public static func fileSystemID(of directory: URL) -> UInt64? {
+    public static func identity(of directory: URL) -> VolumeIdentity? {
         var stats = statfs()
         guard statfs(directory.path, &stats) == 0 else { return nil }
-        return fileSystemID(stats)
+        return identity(stats, uuid: volumeUUID(of: directory))
     }
 
-    static func fileSystemID(_ stats: statfs) -> UInt64 {
-        UInt64(UInt32(bitPattern: stats.f_fsid.val.0)) << 32 | UInt64(UInt32(bitPattern: stats.f_fsid.val.1))
+    static func identity(_ stats: statfs, uuid: String?) -> VolumeIdentity {
+        let fileSystemID =
+            UInt64(UInt32(bitPattern: stats.f_fsid.val.0)) << 32 | UInt64(UInt32(bitPattern: stats.f_fsid.val.1))
+        return VolumeIdentity(fileSystemID: fileSystemID, uuid: uuid, totalBytes: Int64(stats.f_blocks) * Int64(stats.f_bsize))
+    }
+
+    static func volumeUUID(of directory: URL) -> String? {
+        (try? directory.resourceValues(forKeys: [.volumeUUIDStringKey]))?.volumeUUIDString
     }
 
     static func availableBytes(descriptor: Int32) -> Int64? {
@@ -151,20 +163,20 @@ public enum DiskSpeedTest {
         runLock.withLock { isRunning = false }
     }
 
-    /// Runs the test in `directory`, which must be on the file system `expectedFileSystem`.
+    /// Runs the test in `directory`, which must be on the volume `expected`.
     /// Cancelling the calling task stops it with `CancellationError`.
     public static func run(
-        in directory: URL, volumeName: String, expectedFileSystem: UInt64, bytes: Int64,
+        in directory: URL, volumeName: String, expected: VolumeIdentity, bytes: Int64,
         blockSize: Int = defaultBlockSize, reserve: Int64 = reserveBytes,
         progress: @Sendable (Phase, Double) -> Void = { _, _ in }
     ) throws -> DiskSpeedResult {
         try run(
-            in: directory, volumeName: volumeName, expectedFileSystem: expectedFileSystem, bytes: bytes,
+            in: directory, volumeName: volumeName, expected: expected, bytes: bytes,
             blockSize: blockSize, reserve: reserve, freeSpace: availableBytes(descriptor:), progress: progress)
     }
 
     static func run(
-        in directory: URL, volumeName: String, expectedFileSystem: UInt64, bytes: Int64,
+        in directory: URL, volumeName: String, expected: VolumeIdentity, bytes: Int64,
         blockSize: Int, reserve: Int64, freeSpace: (Int32) -> Int64?,
         progress: @Sendable (Phase, Double) -> Void
     ) throws -> DiskSpeedResult {
@@ -174,10 +186,10 @@ public enum DiskSpeedTest {
         let folder = open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard folder >= 0 else { throw DiskSpeedError.cannotWrite(volumeName) }
         defer { close(folder) }
+        // The open folder keeps its volume mounted, so the UUID read by path below belongs to the same volume.
         var folderStats = statfs()
-        guard fstatfs(folder, &folderStats) == 0, fileSystemID(folderStats) == expectedFileSystem else {
-            throw DiskSpeedError.volumeChanged(volumeName)
-        }
+        guard fstatfs(folder, &folderStats) == 0, identity(folderStats, uuid: volumeUUID(of: directory)) == expected
+        else { throw DiskSpeedError.volumeChanged(volumeName) }
         if folderStats.f_flags & UInt32(MNT_RDONLY) != 0 { throw DiskSpeedError.readOnly(volumeName) }
         try checkSpace(needed: bytes, available: freeSpace(folder), reserve: reserve, volumeName: volumeName)
 

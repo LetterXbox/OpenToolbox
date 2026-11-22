@@ -30,7 +30,7 @@ private final class DiskSpeedSession {
             let session = self
             let job = Task.detached(priority: .userInitiated) {
                 try DiskSpeedTest.run(
-                    in: volume.testDirectory, volumeName: volume.name, expectedFileSystem: volume.fileSystemID, bytes: bytes
+                    in: volume.testDirectory, volumeName: volume.name, expected: volume.identity, bytes: bytes
                 ) { phase, fraction in
                     Task { @MainActor in session.show(phase, fraction) }
                 }

@@ -299,8 +299,6 @@ public enum Watermark {
         context.closePDF()
     }
 
-    /// The part of the page a viewer shows. A crop box outside the media box, or an empty one,
-    /// is refused rather than replaced by the whole page.
     static func visibleArea(media: CGRect, crop: CGRect, page: Int) throws -> CGRect {
         let visible = crop.intersection(media)
         guard !visible.isNull, !visible.isInfinite, visible.width > 0, visible.height > 0,

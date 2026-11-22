@@ -299,20 +299,20 @@ struct BatchRenameView: View {
                     .disabled(session.undoJournal == nil || session.isRenaming || session.isRecycling)
                 if isWorkingHere { ProgressView().controlSize(.small) }
             }
-            if session.undoJournal != nil, let summary = lastRenameSummary {
-                Text(summary)
+            if let journal = session.undoJournal {
+                Text(undoSummary(journal))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
         }
     }
 
-    private var lastRenameSummary: String? {
-        let folders = Set(session.undoScopes.map { $0.deletingLastPathComponent().lastPathComponent })
-        guard !session.undoScopes.isEmpty else { return nil }
-        let count = session.undoScopes.count
+    private func undoSummary(_ journal: RenameUndoJournal) -> String {
+        let folders = journal.folders
+        let count = journal.fileCount
         if folders.count == 1, let folder = folders.first {
-            return L("Undo restores the last rename in any window: \(count) files in “\(folder)”.")
+            let path = (folder.path as NSString).abbreviatingWithTildeInPath
+            return L("Undo restores the last rename in any window: \(count) files in \(path).")
         }
         return L("Undo restores the last rename in any window: \(count) files in \(folders.count) folders.")
     }

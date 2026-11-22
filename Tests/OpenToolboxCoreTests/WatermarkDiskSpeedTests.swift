@@ -295,8 +295,8 @@ struct DiskSpeedTests {
         try FileManager.default.contentsOfDirectory(atPath: directory.path)
     }
 
-    private func fileSystem(of directory: URL) throws -> UInt64 {
-        try #require(DiskSpeedTest.fileSystemID(of: directory))
+    private func identity(of directory: URL) throws -> VolumeIdentity {
+        try #require(DiskSpeedTest.identity(of: directory))
     }
 
     private let megabyte = 1024 * 1024
@@ -305,11 +305,12 @@ struct DiskSpeedTests {
         try await withTemporaryDirectory { directory in
             let log = ProgressLog()
             let result = try DiskSpeedTest.run(
-                in: directory, volumeName: "Test", expectedFileSystem: try fileSystem(of: directory),
+                in: directory, volumeName: "Test", expected: try identity(of: directory),
                 bytes: Int64(4 * megabyte), blockSize: megabyte, reserve: 0, progress: { log.add($0, $1) })
             #expect(result.bytes == Int64(4 * megabyte))
             #expect(result.writeBytesPerSecond > 0 && result.readBytesPerSecond > 0)
-            #expect(try contents(of: directory).isEmpty)
+            let leftovers = try contents(of: directory)
+            #expect(leftovers.isEmpty)
             #expect(log.all.contains { $0.0 == .writing && $0.1 == 1 })
             #expect(log.all.last.map { $0.0 == .reading && $0.1 == 1 } == true)
         }
@@ -317,12 +318,12 @@ struct DiskSpeedTests {
 
     @Test func cancellingStopsTheTestAndLeavesNothingBehind() async throws {
         try await withTemporaryDirectory { directory in
-            let fileSystem = try fileSystem(of: directory)
+            let volume = try identity(of: directory)
             let megabyte = self.megabyte
             let task = Task {
                 withUnsafeCurrentTask { $0?.cancel() }
                 return try DiskSpeedTest.run(
-                    in: directory, volumeName: "Test", expectedFileSystem: fileSystem, bytes: Int64(64 * megabyte),
+                    in: directory, volumeName: "Test", expected: volume, bytes: Int64(64 * megabyte),
                     blockSize: megabyte, reserve: 0)
             }
             await #expect(throws: CancellationError.self) { try await task.value }
@@ -346,27 +347,34 @@ struct DiskSpeedTests {
 
     @Test func onlyOneTestRunsAtATime() async throws {
         try await withTemporaryDirectory { directory in
-            let fileSystem = try fileSystem(of: directory)
+            let volume = try identity(of: directory)
             #expect(DiskSpeedTest.claim())
             #expect(throws: DiskSpeedError.alreadyRunning) {
                 try DiskSpeedTest.run(
-                    in: directory, volumeName: "Test", expectedFileSystem: fileSystem, bytes: Int64(megabyte), reserve: 0)
+                    in: directory, volumeName: "Test", expected: volume, bytes: Int64(megabyte), reserve: 0)
             }
             DiskSpeedTest.release()
             let leftovers = try contents(of: directory)
             #expect(leftovers.isEmpty)
             _ = try DiskSpeedTest.run(
-                in: directory, volumeName: "Test", expectedFileSystem: fileSystem, bytes: Int64(megabyte),
+                in: directory, volumeName: "Test", expected: volume, bytes: Int64(megabyte),
                 blockSize: megabyte, reserve: 0)
         }
     }
 
-    @Test func refusesADifferentFileSystemThanTheOneChosen() async throws {
+    @Test func refusesADifferentVolumeThanTheOneChosen() async throws {
         try await withTemporaryDirectory { directory in
-            let other = try fileSystem(of: directory) ^ 1
-            #expect(throws: DiskSpeedError.volumeChanged("Test")) {
-                try DiskSpeedTest.run(
-                    in: directory, volumeName: "Test", expectedFileSystem: other, bytes: Int64(megabyte), reserve: 0)
+            let real = try identity(of: directory)
+            let others = [
+                VolumeIdentity(fileSystemID: real.fileSystemID ^ 1, uuid: real.uuid, totalBytes: real.totalBytes),
+                VolumeIdentity(fileSystemID: real.fileSystemID, uuid: "00000000-0000-0000-0000-000000000000", totalBytes: real.totalBytes),
+                VolumeIdentity(fileSystemID: real.fileSystemID, uuid: real.uuid, totalBytes: real.totalBytes + 4096),
+            ]
+            for other in others {
+                #expect(throws: DiskSpeedError.volumeChanged("Test")) {
+                    try DiskSpeedTest.run(
+                        in: directory, volumeName: "Test", expected: other, bytes: Int64(megabyte), reserve: 0)
+                }
             }
         }
     }
@@ -378,14 +386,15 @@ struct DiskSpeedTests {
             let log = ProgressLog()
             #expect(throws: DiskSpeedError.notEnoughSpace(needed: Int64(8 * megabyte) + 100, available: 0)) {
                 try DiskSpeedTest.run(
-                    in: directory, volumeName: "Test", expectedFileSystem: try fileSystem(of: directory),
+                    in: directory, volumeName: "Test", expected: try identity(of: directory),
                     bytes: Int64(16 * megabyte), blockSize: megabyte, reserve: 100, freeSpace: readings.next,
                     progress: { log.add($0, $1) })
             }
             #expect(readings.count == 3)
             #expect(log.all.contains { $0.0 == .writing && $0.1 == 0.5 })
             #expect(!log.all.contains { $0.0 == .reading })
-            #expect(try contents(of: directory).isEmpty)
+            let leftovers = try contents(of: directory)
+            #expect(leftovers.isEmpty)
         }
     }
 
@@ -393,13 +402,18 @@ struct DiskSpeedTests {
         try await withTemporaryDirectory { directory in
             let plenty = Int64(1) << 40
             let readings = SpaceReadings([plenty, plenty, nil])
+            let log = ProgressLog()
             #expect(throws: DiskSpeedError.spaceUnknown("Test")) {
                 try DiskSpeedTest.run(
-                    in: directory, volumeName: "Test", expectedFileSystem: try fileSystem(of: directory),
+                    in: directory, volumeName: "Test", expected: try identity(of: directory),
                     bytes: Int64(16 * megabyte), blockSize: megabyte, reserve: 0, freeSpace: readings.next,
-                    progress: { _, _ in })
+                    progress: { log.add($0, $1) })
             }
-            #expect(try contents(of: directory).isEmpty)
+            #expect(readings.count == 3)
+            #expect(log.all.contains { $0.0 == .writing && $0.1 == 0.5 })
+            #expect(!log.all.contains { $0.0 == .reading })
+            let leftovers = try contents(of: directory)
+            #expect(leftovers.isEmpty)
         }
     }
 
@@ -408,7 +422,8 @@ struct DiskSpeedTests {
             let missing = directory.appending(path: "missing", directoryHint: .isDirectory)
             #expect(throws: DiskSpeedError.cannotWrite("Test")) {
                 try DiskSpeedTest.run(
-                    in: missing, volumeName: "Test", expectedFileSystem: 0, bytes: Int64(megabyte), reserve: 0)
+                    in: missing, volumeName: "Test", expected: VolumeIdentity(fileSystemID: 0, uuid: nil, totalBytes: 0),
+                    bytes: Int64(megabyte), reserve: 0)
             }
         }
     }
@@ -419,6 +434,6 @@ struct DiskSpeedTests {
         #expect(startup.mountPoint.path == "/")
         #expect(startup.testDirectory == FileManager.default.temporaryDirectory)
         #expect(!startup.isReadOnly)
-        #expect(startup.fileSystemID == DiskSpeedTest.fileSystemID(of: FileManager.default.temporaryDirectory))
+        #expect(startup.identity == DiskSpeedTest.identity(of: FileManager.default.temporaryDirectory))
     }
 }

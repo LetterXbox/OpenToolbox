@@ -78,11 +78,11 @@ struct WiFiPasswordView: View {
             HStack {
                 Button(L("Show Password"), action: reveal)
                     .buttonStyle(.borderedProminent)
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isWorking || security == .open)
+                    .disabled(name.isEmpty || isWorking || security == .open)
                 if isWorking { ProgressView().controlSize(.small) }
                 if security == .open {
                     Button(L("Make QR Code")) { makeQR(password: "") }
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(name.isEmpty)
                 }
                 Spacer()
             }
@@ -149,7 +149,7 @@ struct WiFiPasswordView: View {
     }
 
     private func reveal() {
-        let ssid = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ssid = name
         isWorking = true
         message = nil
         Task {
@@ -157,7 +157,7 @@ struct WiFiPasswordView: View {
             let result = await runOffMain { Result { try WiFiPassword.savedPassword(for: ssid) } }
             switch result {
             case .success(let found):
-                guard ssid == name.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+                guard ssid == name else { return }
                 password = found
                 makeQR(password: found)
             case .failure(let error):
@@ -168,7 +168,7 @@ struct WiFiPasswordView: View {
 
     private func makeQR(password: String) {
         let payload = WiFiPassword.qrPayload(
-            ssid: name.trimmingCharacters(in: .whitespacesAndNewlines), password: password, security: security,
+            ssid: name, password: password, security: security,
             hidden: isHidden)
         qrImage = try? QRCode.generate(payload)
     }

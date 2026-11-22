@@ -67,11 +67,11 @@ struct PDFFormsView: View {
 
     private func load() {
         saved = nil
-        failure = nil
         guard let url = files.first else {
             document = nil
             return
         }
+        failure = nil
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
         do {
@@ -106,18 +106,39 @@ struct PDFFormsView: View {
 @Observable
 final class ScannerList: NSObject, ICDeviceBrowserDelegate {
     var scanners: [ICScannerDevice] = []
+    private(set) var includesNetwork = false
     @ObservationIgnored private let browser = ICDeviceBrowser()
 
     override init() {
         super.init()
         browser.delegate = self
-        browser.browsedDeviceTypeMask = ICDeviceTypeMask(
-            rawValue: ICDeviceTypeMask.scanner.rawValue | ICDeviceLocationTypeMask.local.rawValue
-                | ICDeviceLocationTypeMask.bonjour.rawValue | ICDeviceLocationTypeMask.shared.rawValue) ?? .scanner
+        browser.browsedDeviceTypeMask = Self.mask(network: false)
+    }
+
+    /// Scanners connected to this Mac, plus those on the network once the user asks for them.
+    static func mask(network: Bool) -> ICDeviceTypeMask {
+        var raw = ICDeviceTypeMask.scanner.rawValue | ICDeviceLocationTypeMask.local.rawValue
+        if network { raw |= ICDeviceLocationTypeMask.bonjour.rawValue | ICDeviceLocationTypeMask.shared.rawValue }
+        return ICDeviceTypeMask(rawValue: raw) ?? .scanner
     }
 
     func start() { if !browser.isBrowsing { browser.start() } }
-    func stop() { if browser.isBrowsing { browser.stop() } }
+
+    func stop() {
+        if browser.isBrowsing { browser.stop() }
+        if includesNetwork {
+            includesNetwork = false
+            browser.browsedDeviceTypeMask = Self.mask(network: false)
+        }
+    }
+
+    func findNetworkScanners() {
+        guard !includesNetwork else { return }
+        includesNetwork = true
+        if browser.isBrowsing { browser.stop() }
+        browser.browsedDeviceTypeMask = Self.mask(network: true)
+        browser.start()
+    }
 
     nonisolated func deviceBrowser(_ browser: ICDeviceBrowser, didAdd device: ICDevice, moreComing: Bool) {
         guard let scanner = device as? ICScannerDevice else { return }
@@ -198,6 +219,10 @@ struct ScanDocumentView: View {
                     Text(L("No scanners found.")).foregroundStyle(.secondary)
                 }
                 Spacer()
+                if !scanners.includesNetwork {
+                    Button(L("Find Network Scanners"), action: scanners.findNetworkScanners)
+                        .help(L("Looks for scanners shared on your local network."))
+                }
             }
             if let selected {
                 ScannerPane(scanner: selected) { url in addScan(url) }

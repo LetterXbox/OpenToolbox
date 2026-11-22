@@ -102,8 +102,17 @@ public enum Transcript {
 
 /// On-device speech recognition for audio and video files.
 public enum Transcriber {
-    public static func supportedLocales() -> [Locale] {
-        SFSpeechRecognizer.supportedLocales().sorted { $0.identifier < $1.identifier }
+    /// Languages the recognizer that will run can transcribe on this Mac.
+    public static func supportedLocales() async -> [Locale] {
+        let locales: [Locale]
+        if #available(macOS 26, *) {
+            locales = await SpeechTranscriber.supportedLocales
+        } else {
+            locales = SFSpeechRecognizer.supportedLocales().filter {
+                SFSpeechRecognizer(locale: $0)?.supportsOnDeviceRecognition == true
+            }
+        }
+        return locales.sorted { $0.identifier < $1.identifier }
     }
 
     @MainActor

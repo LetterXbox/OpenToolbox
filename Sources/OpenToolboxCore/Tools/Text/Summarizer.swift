@@ -40,12 +40,14 @@ public enum SummarizerAvailability: Equatable, Sendable {
 
 public enum SummarizerError: Error, Equatable, LocalizedError {
     case emptyText
+    case tooLong
     case unavailable(String)
     case failed(String)
 
     public var errorDescription: String? {
         switch self {
         case .emptyText: coreLocalized("Enter or drop some text to summarize.")
+        case .tooLong: coreLocalized("This text is too long to summarize. Try a shorter part of it.")
         case .unavailable(let message): message
         case .failed(let detail): coreLocalized("The summary couldn't be written: \(detail)")
         }
@@ -56,8 +58,6 @@ public enum SummarizerError: Error, Equatable, LocalizedError {
 public enum Summarizer {
     /// Characters per request, well inside the model's context window for any script.
     static let chunkLimit = 2_400
-    /// Long texts are condensed in rounds; a text that doesn't shrink stops after this many.
-    static let maximumRounds = 4
 
     public static var availability: SummarizerAvailability {
         guard #available(macOS 26, *) else { return .needsNewerMacOS }
@@ -79,20 +79,21 @@ public enum Summarizer {
         }
         do {
             var pieces = DocumentText.chunks(trimmed, limit: chunkLimit)
-            var rounds = 0
-            while pieces.count > 1, rounds < maximumRounds {
+            while pieces.count > 1 {
+                let before = pieces.reduce(0) { $0 + $1.count }
                 var notes: [String] = []
                 for piece in pieces {
                     try Task.checkCancellation()
                     notes.append(try await respond(to: piece, instruction: "Write the key points in a few sentences."))
                 }
                 pieces = DocumentText.chunks(notes.joined(separator: "\n\n"), limit: chunkLimit)
-                rounds += 1
+                guard pieces.reduce(0, { $0 + $1.count }) < before else { throw SummarizerError.tooLong }
             }
             try Task.checkCancellation()
-            let notes = pieces.joined(separator: "\n\n")
-            return try await respond(to: String(notes.prefix(chunkLimit)), instruction: style.instruction)
+            return try await respond(to: pieces.first ?? trimmed, instruction: style.instruction)
         } catch let error as CancellationError {
+            throw error
+        } catch let error as SummarizerError {
             throw error
         } catch {
             throw SummarizerError.failed(error.localizedDescription)

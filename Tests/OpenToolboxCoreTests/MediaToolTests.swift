@@ -103,6 +103,12 @@ struct ExtractFramesTests {
         #expect(throws: MediaToolError.tooManyFrames(FrameExtractor.maximumFrames)) {
             try FrameExtractor.times(for: .every(0.001), duration: 5)
         }
+        #expect(throws: MediaToolError.tooManyFrames(FrameExtractor.maximumFrames)) {
+            try FrameExtractor.times(for: .every(1e-18), duration: 60)
+        }
+        #expect(throws: MediaToolError.tooManyFrames(FrameExtractor.maximumFrames)) {
+            try FrameExtractor.times(for: .every(.leastNonzeroMagnitude), duration: 60)
+        }
     }
 
     @Test func savesFrames() async throws {

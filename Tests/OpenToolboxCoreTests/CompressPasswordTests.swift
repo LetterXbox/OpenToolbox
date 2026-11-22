@@ -81,6 +81,21 @@ struct CompressImagesTests {
         }
     }
 
+    @Test func multipageImagesAreRefused() async throws {
+        try await withTemporaryDirectory { directory in
+            let source = directory.appending(path: "pages.tiff")
+            let destination = try #require(CGImageDestinationCreateWithURL(source as CFURL, "public.tiff" as CFString, 2, nil))
+            CGImageDestinationAddImage(destination, try makeNoisyImage(width: 200, height: 100), nil)
+            CGImageDestinationAddImage(destination, try makeNoisyImage(width: 200, height: 100), nil)
+            #expect(CGImageDestinationFinalize(destination))
+            #expect(throws: ImageCompressionError.multipleImages("pages.tiff")) {
+                try ImageCompressor.compress(
+                    source, options: ImageCompressionOptions(), output: OutputDirectory(baseDirectory: directory.appending(path: "out")),
+                    tool: tool)
+            }
+        }
+    }
+
     @Test func longEdgeLimitsSize() async throws {
         try await withTemporaryDirectory { directory in
             let source = directory.appending(path: "wide.jpg")
@@ -147,11 +162,59 @@ struct PDFPasswordTests {
             #expect(throws: PDFPasswordError.needsOwnerPassword("report protected.pdf")) {
                 try PDFSecurity.removePassword(protected, password: "user", output: output, tool: tool)
             }
+            #expect(throws: PDFPasswordError.alreadyProtected("report protected.pdf")) {
+                try PDFSecurity.protect(protected, with: PDFProtection(openPassword: "new"), output: output, tool: tool)
+            }
             let unlocked = try PDFSecurity.removePassword(protected, password: "owner", output: output, tool: tool)
             let plain = try #require(PDFDocument(url: unlocked))
             #expect(!plain.isEncrypted)
             #expect(plain.allowsPrinting)
             #expect(plain.allowsCopying)
+        }
+    }
+
+    @Test func ownerRestrictedPDFsCantBeReprotected() async throws {
+        try await withTemporaryDirectory { directory in
+            let source = directory.appending(path: "restricted.pdf")
+            let document = try samplePDF(pages: 1)
+            let raw = PDFAccessPermissions.allowsContentCopying.rawValue | PDFAccessPermissions.allowsLowQualityPrinting.rawValue
+            #expect(document.write(to: source, withOptions: [.ownerPasswordOption: "owner", .accessPermissionsOption: raw]))
+            let opened = try #require(PDFDocument(url: source))
+            #expect(opened.isEncrypted)
+            #expect(!opened.isLocked)
+            let output = OutputDirectory(baseDirectory: directory.appending(path: "out"))
+            #expect(throws: PDFPasswordError.alreadyProtected("restricted.pdf")) {
+                try PDFSecurity.protect(source, with: PDFProtection(openPassword: "x"), output: output, tool: tool)
+            }
+            #expect(throws: PDFPasswordError.wrongPassword("restricted.pdf")) {
+                try PDFSecurity.removePassword(source, password: "guess", output: output, tool: tool)
+            }
+            let unlocked = try PDFSecurity.removePassword(source, password: "owner", output: output, tool: tool)
+            #expect(try #require(PDFDocument(url: unlocked)).isEncrypted == false)
+        }
+    }
+
+    @Test func removingAPasswordKeepsTheOutline() async throws {
+        try await withTemporaryDirectory { directory in
+            let document = try samplePDF(pages: 3)
+            let root = PDFOutline()
+            for (index, label) in ["Intro", "Results"].enumerated() {
+                let entry = PDFOutline()
+                entry.label = label
+                entry.destination = PDFDestination(page: try #require(document.page(at: index * 2)), at: .zero)
+                root.insertChild(entry, at: root.numberOfChildren)
+            }
+            document.outlineRoot = root
+            let source = directory.appending(path: "book.pdf")
+            #expect(document.write(to: source, withOptions: [.userPasswordOption: "pw", .ownerPasswordOption: "pw"]))
+            let output = OutputDirectory(baseDirectory: directory.appending(path: "out"))
+            let unlocked = try PDFSecurity.removePassword(source, password: "pw", output: output, tool: tool)
+            let reopened = try #require(PDFDocument(url: unlocked))
+            let outline = try #require(reopened.outlineRoot)
+            #expect(outline.numberOfChildren == 2)
+            #expect(outline.child(at: 1)?.label == "Results")
+            let page = try #require(outline.child(at: 1)?.destination?.page)
+            #expect(reopened.index(for: page) == 2)
         }
     }
 

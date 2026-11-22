@@ -329,9 +329,9 @@ struct TranscribeView: View {
                 }
             }
         }
-        .onAppear {
+        .task {
             guard locales.isEmpty else { return }
-            locales = Transcriber.supportedLocales()
+            locales = await Transcriber.supportedLocales()
             if !locales.contains(where: { $0.identifier == localeID }) {
                 let language = Locale.current.language.languageCode?.identifier
                 localeID =

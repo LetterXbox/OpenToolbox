@@ -40,8 +40,8 @@ public struct SRGBColor: Equatable, Hashable, Sendable {
     }
 
     public var rgb: String {
-        let channels = "\(Self.byte(red)), \(Self.byte(green)), \(Self.byte(blue))"
-        return alpha < 1 ? "rgb(\(channels) / \(Self.decimal(alpha)))" : "rgb(\(channels))"
+        let (r, g, b) = (Self.byte(red), Self.byte(green), Self.byte(blue))
+        return alpha < 1 ? "rgb(\(r) \(g) \(b) / \(Self.decimal(alpha)))" : "rgb(\(r), \(g), \(b))"
     }
 
     /// Hue in degrees, saturation and lightness in 0...1.
@@ -73,8 +73,12 @@ public struct SRGBColor: Equatable, Hashable, Sendable {
 
     public var hsl: String {
         let (h, s, l) = hslComponents
-        let body = "\(Int(h.rounded()) % 360), \(Int((s * 100).rounded()))%, \(Int((l * 100).rounded()))%"
-        return alpha < 1 ? "hsl(\(body) / \(Self.decimal(alpha)))" : "hsl(\(body))"
+        let (hue, saturation, lightness) = (
+            Int(h.rounded()) % 360, Int((s * 100).rounded()), Int((l * 100).rounded())
+        )
+        return alpha < 1
+            ? "hsl(\(hue) \(saturation)% \(lightness)% / \(Self.decimal(alpha)))"
+            : "hsl(\(hue), \(saturation)%, \(lightness)%)"
     }
 
     public var hsb: String {

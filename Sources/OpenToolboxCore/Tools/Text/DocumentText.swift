@@ -15,10 +15,11 @@ public enum DocumentTextError: Error, Equatable, LocalizedError {
     }
 }
 
-/// Plain text from documents: text, Markdown, RTF, Word, OpenDocument, HTML and PDF.
+/// Plain text from documents: text, Markdown, RTF, Word, OpenDocument and PDF. HTML is not
+/// read, because importing it can load images and styles from the network.
 public enum DocumentText {
     public static let readableTypes: [UTType] = [
-        .plainText, .rtf, .rtfd, .pdf, .html,
+        .plainText, .rtf, .rtfd, .pdf,
         UTType("org.openxmlformats.wordprocessingml.document"), UTType("com.microsoft.word.doc"),
         UTType("org.oasis-open.opendocument.text"), UTType("net.daringfireball.markdown"),
     ].compactMap { $0 }
@@ -27,7 +28,9 @@ public enum DocumentText {
         let name = url.lastPathComponent
         let type = UTType(filenameExtension: url.pathExtension)
         let text: String
-        if type?.conforms(to: .pdf) == true {
+        if type?.conforms(to: .html) == true || type?.conforms(to: .webArchive) == true {
+            throw DocumentTextError.unreadable(name)
+        } else if type?.conforms(to: .pdf) == true {
             guard let document = PDFDocument(url: url) else { throw DocumentTextError.unreadable(name) }
             if document.isLocked { throw PDFToolError.locked(name) }
             text = PDFTools.text(of: document)

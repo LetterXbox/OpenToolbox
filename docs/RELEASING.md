@@ -25,7 +25,7 @@ Run the release review (GPT-6.2 Astra, high effort) on the release commit and re
 
 ## 3. Package
 
-On a Mac with Xcode 16 or later, from a clean checkout of the release commit:
+On a Mac with Xcode 26 or later, from a clean checkout of the release commit:
 
 ```sh
 swift test

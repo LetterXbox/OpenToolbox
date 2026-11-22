@@ -2,6 +2,17 @@ import CoreGraphics
 import Foundation
 import ImageIO
 
+public enum ImageCompressionError: Error, Equatable, LocalizedError {
+    case multipleImages(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .multipleImages(let name):
+            coreLocalized("“\(name)” has several frames or pages, which compressing would drop, so it was skipped.")
+        }
+    }
+}
+
 public struct ImageCompressionOptions: Equatable, Sendable {
     public enum Target: Equatable, Sendable {
         /// Keep JPEG and HEIC files in their format; re-encode anything else as `fallback`.
@@ -55,6 +66,9 @@ public enum ImageCompressor {
         _ source: URL, options: ImageCompressionOptions, output: OutputDirectory, tool: ToolID
     ) throws -> ImageCompressionResult {
         let originalBytes = try fileSize(source)
+        if let images = CGImageSourceCreateWithURL(source as CFURL, nil), CGImageSourceGetCount(images) > 1 {
+            throw ImageCompressionError.multipleImages(source.lastPathComponent)
+        }
         let loaded = try ImageProcessor.loadImage(at: source)
         let format = ImageProcessor.resolvedFormat(
             format(for: options.target, source: loaded.type.flatMap(ImageFormat.init(utType:))), sourceType: loaded.type)

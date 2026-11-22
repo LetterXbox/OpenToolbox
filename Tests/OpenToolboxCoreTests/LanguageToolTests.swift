@@ -42,6 +42,11 @@ struct DocumentTextTests {
             try data.write(to: rtf)
             #expect(try DocumentText.read(rtf) == "Rich words")
 
+            let html = directory.appending(path: "page.html")
+            try Data(#"<p>Hi</p><img src="https://example.com/pixel.png">"#.utf8).write(to: html)
+            #expect(throws: DocumentTextError.unreadable("page.html")) { try DocumentText.read(html) }
+            #expect(!DocumentText.readableTypes.contains(.html))
+
             let empty = directory.appending(path: "empty.txt")
             try Data("  \n".utf8).write(to: empty)
             #expect(throws: DocumentTextError.empty("empty.txt")) { try DocumentText.read(empty) }

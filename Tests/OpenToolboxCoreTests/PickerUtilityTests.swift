@@ -91,7 +91,8 @@ struct ColorFormatTests {
         let color = SRGBColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 0.5)
         #expect(color.swiftUI == "Color(red: 0.2, green: 0.4, blue: 0.6, opacity: 0.5)")
         #expect(color.appKit == "NSColor(srgbRed: 0.2, green: 0.4, blue: 0.6, alpha: 0.5)")
-        #expect(color.rgb == "rgb(51, 102, 153 / 0.5)")
+        #expect(color.rgb == "rgb(51 102 153 / 0.5)")
+        #expect(color.hsl == "hsl(210 50% 40% / 0.5)")
         #expect(SRGBColor(red: 2, green: -1, blue: .nan).hex == "#FF0000")
     }
 }
@@ -148,7 +149,7 @@ struct WiFiQRTests {
     }
 
     @Test func refusesEmptyName() {
-        #expect(throws: WiFiPasswordError.emptyName) { try WiFiPassword.savedPassword(for: "  ") }
+        #expect(throws: WiFiPasswordError.emptyName) { try WiFiPassword.savedPassword(for: "") }
     }
 }
 

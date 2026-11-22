@@ -61,7 +61,7 @@ public enum WiFiPassword {
     /// Looks up a saved password in the System keychain. macOS asks for an administrator's
     /// name and password first, so call this off the main thread.
     public static func savedPassword(for ssid: String) throws -> String {
-        let name = ssid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = ssid
         guard !name.isEmpty else { throw WiFiPasswordError.emptyName }
         var password: NSString?
         let status = CWKeychainFindWiFiPassword(.system, Data(name.utf8), &password)

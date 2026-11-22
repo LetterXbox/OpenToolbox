@@ -16,11 +16,57 @@ private func temporaryFile(named name: String) throws -> URL {
     return folder.appending(path: name)
 }
 
-/// Moves a finished recording into the output folder and removes its temporary folder.
+/// Copies a finished recording into the output folder. The temporary recording is removed
+/// only once the copy is saved, so a failed save can be retried or saved elsewhere.
 private func publishRecording(_ temporary: URL, named name: String, output: OutputDirectory, tool: ToolID) throws -> URL {
-    defer { try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent()) }
-    return try output.writeNewFile(for: tool, preferredName: name) {
-        try FileManager.default.moveItem(at: temporary, to: $0)
+    let saved = try output.writeNewFile(for: tool, preferredName: name) {
+        try FileManager.default.copyItem(at: temporary, to: $0)
+    }
+    try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent())
+    return saved
+}
+
+/// A recording that couldn't be saved to the output folder, kept until it is saved or discarded.
+struct UnsavedRecording: Equatable {
+    let url: URL
+    let name: String
+
+    @MainActor
+    func saveAs() -> URL? {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = name
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let destination = panel.url else { return nil }
+        do {
+            try FileManager.default.copyItem(at: url, to: destination)
+        } catch {
+            return nil
+        }
+        discard()
+        return destination
+    }
+
+    func discard() {
+        try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+    }
+}
+
+/// Retry, Save As and Discard for a recording whose save failed.
+private struct UnsavedRecordingActions: View {
+    let unsaved: UnsavedRecording
+    let retry: () -> Void
+    let saved: (URL) -> Void
+    let discard: () -> Void
+
+    var body: some View {
+        HStack {
+            Text(L("The recording is kept until you save it.")).foregroundStyle(.secondary)
+            Button(L("Try Again"), action: retry)
+            Button(L("Save As…")) {
+                if let url = unsaved.saveAs() { saved(url) }
+            }
+            Button(L("Discard"), role: .destructive, action: discard)
+        }
     }
 }
 
@@ -60,6 +106,10 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
     var capturesMicrophone = false
     var failure: String?
     var saved: URL?
+    var unsaved: UnsavedRecording?
+
+    /// Recorders still finishing a recording whose window has closed, kept alive until saved.
+    private static var finishing: Set<ScreenRecorder> = []
 
     @ObservationIgnored private var stream: SCStream?
     @ObservationIgnored private var recording: SCRecordingOutput?
@@ -71,6 +121,8 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
     func choose(output: OutputDirectory, tool: ToolID) {
         failure = nil
         saved = nil
+        unsaved?.discard()
+        unsaved = nil
         destination = (output, tool)
         let picker = SCContentSharingPicker.shared
         var configuration = SCContentSharingPickerConfiguration()
@@ -82,9 +134,24 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
         picker.present()
     }
 
+    /// Called when the tool's view goes away: a pending choice is cancelled and a running
+    /// recording is stopped and saved.
+    func close() {
+        switch phase {
+        case .picking:
+            endPicking()
+            phase = .idle
+        case .recording:
+            stop()
+        case .idle, .finishing:
+            break
+        }
+    }
+
     func stop() {
         guard case .recording = phase, let stream else { return }
         phase = .finishing
+        Self.finishing.insert(self)
         stream.stopCapture { [weak self] error in
             Task { @MainActor in
                 if let error { self?.fail(error) }
@@ -138,10 +205,21 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
     private func finish() {
         defer { reset() }
         guard let temporary, let destination else { return }
+        let name = recordingName("Screen Recording", extension: "mov")
         do {
-            saved = try publishRecording(
-                temporary, named: recordingName("Screen Recording", extension: "mov"), output: destination.output,
-                tool: destination.tool)
+            saved = try publishRecording(temporary, named: name, output: destination.output, tool: destination.tool)
+        } catch {
+            failure = error.localizedDescription
+            unsaved = UnsavedRecording(url: temporary, name: name)
+        }
+    }
+
+    func retrySave() {
+        guard let unsaved, let destination else { return }
+        do {
+            saved = try publishRecording(unsaved.url, named: unsaved.name, output: destination.output, tool: destination.tool)
+            self.unsaved = nil
+            failure = nil
         } catch {
             failure = error.localizedDescription
         }
@@ -158,6 +236,7 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
         recording = nil
         temporary = nil
         phase = .idle
+        Self.finishing.remove(self)
     }
 
     nonisolated func contentSharingPicker(
@@ -242,10 +321,24 @@ struct RecordScreenView: View {
                 }
             }
             if let failure = recorder.failure { ErrorMessage(text: failure) }
+            if let unsaved = recorder.unsaved {
+                UnsavedRecordingActions(
+                    unsaved: unsaved, retry: recorder.retrySave,
+                    saved: { url in
+                        recorder.saved = url
+                        recorder.unsaved = nil
+                        recorder.failure = nil
+                    },
+                    discard: {
+                        unsaved.discard()
+                        recorder.unsaved = nil
+                    })
+            }
             Text(L("macOS shows a recording indicator in the menu bar while OpenToolbox records."))
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
+        .onDisappear { recorder.close() }
         .reportsActivity(recorder.isBusy)
     }
 }
@@ -256,9 +349,13 @@ struct RecordScreenView: View {
 @Observable
 final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     var since: Date?
+    var isRequestingAccess = false
     var level: Float = 0
     var failure: String?
     var saved: URL?
+    var unsaved: UnsavedRecording?
+    @ObservationIgnored private var isClosed = false
+    @ObservationIgnored private var destination: (output: OutputDirectory, tool: ToolID)?
 
     @ObservationIgnored private var recorder: AVAudioRecorder?
     @ObservationIgnored private var temporary: URL?
@@ -269,9 +366,17 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     var inputName: String? { AVCaptureDevice.default(for: .audio)?.localizedName }
 
     func start() async {
+        guard !isRequestingAccess, !isRecording else { return }
         failure = nil
         saved = nil
-        guard await AVAudioApplication.requestRecordPermission() else {
+        unsaved?.discard()
+        unsaved = nil
+        isClosed = false
+        isRequestingAccess = true
+        let granted = await AVAudioApplication.requestRecordPermission()
+        isRequestingAccess = false
+        guard !isClosed else { return }
+        guard granted else {
             failure = L("Allow OpenToolbox in System Settings → Privacy & Security → Microphone to record.")
             return
         }
@@ -310,8 +415,16 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         level = max(0, min(1, (power + 60) / 60))
     }
 
+    /// Called when the tool's view goes away: a pending start is cancelled and a running
+    /// recording is saved.
+    func close(output: OutputDirectory, tool: ToolID) {
+        isClosed = true
+        if isRecording { stop(output: output, tool: tool) }
+    }
+
     func stop(output: OutputDirectory, tool: ToolID) {
         guard let recorder, let temporary else { return }
+        destination = (output, tool)
         recorder.stop()
         meterTask?.cancel()
         meterTask = nil
@@ -319,9 +432,21 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         self.temporary = nil
         since = nil
         level = 0
+        let name = recordingName("Recording", extension: "m4a")
         do {
-            saved = try publishRecording(
-                temporary, named: recordingName("Recording", extension: "m4a"), output: output, tool: tool)
+            saved = try publishRecording(temporary, named: name, output: output, tool: tool)
+        } catch {
+            failure = error.localizedDescription
+            unsaved = UnsavedRecording(url: temporary, name: name)
+        }
+    }
+
+    func retrySave() {
+        guard let unsaved, let destination else { return }
+        do {
+            saved = try publishRecording(unsaved.url, named: unsaved.name, output: destination.output, tool: destination.tool)
+            self.unsaved = nil
+            failure = nil
         } catch {
             failure = error.localizedDescription
         }
@@ -375,6 +500,7 @@ struct RecordAudioView: View {
                         Task { await recorder.start() }
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(recorder.isRequestingAccess)
                 }
                 Spacer()
                 if let saved = recorder.saved, !recorder.isRecording {
@@ -382,11 +508,24 @@ struct RecordAudioView: View {
                 }
             }
             if let failure = recorder.failure { ErrorMessage(text: failure) }
+            if let unsaved = recorder.unsaved {
+                UnsavedRecordingActions(
+                    unsaved: unsaved, retry: recorder.retrySave,
+                    saved: { url in
+                        recorder.saved = url
+                        recorder.unsaved = nil
+                        recorder.failure = nil
+                    },
+                    discard: {
+                        unsaved.discard()
+                        recorder.unsaved = nil
+                    })
+            }
             Text(L("Recordings are saved as AAC audio in \(model.outputBaseDirectory.lastPathComponent)."))
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
-        .onDisappear { if recorder.isRecording { recorder.stop(output: model.outputDirectory, tool: tool.id) } }
+        .onDisappear { recorder.close(output: model.outputDirectory, tool: tool.id) }
         .reportsActivity(recorder.isRecording)
     }
 }
@@ -482,12 +621,32 @@ struct TrimAudioView: View {
         }
     }
 
+    /// Reads both time fields, so an edit that wasn't confirmed with Return still counts.
+    private func commitTimes() -> Bool {
+        guard let duration, let parsedStart = MediaTime.parse(startText), let parsedEnd = MediaTime.parse(endText)
+        else {
+            failure = L("Enter times as seconds or minutes:seconds, for example 1:30.")
+            return false
+        }
+        start = min(max(parsedStart, 0), duration)
+        end = min(max(parsedEnd, 0), duration)
+        startText = MediaTime.format(start)
+        endText = MediaTime.format(end)
+        guard end > start else {
+            failure = MediaToolError.invalidRange.localizedDescription
+            return false
+        }
+        failure = nil
+        return true
+    }
+
     private func togglePlayback() {
         if let player, player.isPlaying {
             player.stop()
             self.player = nil
             return
         }
+        guard commitTimes() else { return }
         guard let url = files.first, let audio = try? AVAudioPlayer(contentsOf: url) else { return }
         audio.currentTime = start
         audio.play()
@@ -503,6 +662,7 @@ struct TrimAudioView: View {
     }
 
     private func run() {
+        guard commitTimes() else { return }
         let files = self.files, start = self.start, end = self.end
         let output = model.outputDirectory, toolID = tool.id
         isProcessing = true

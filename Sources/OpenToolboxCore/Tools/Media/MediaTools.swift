@@ -68,8 +68,11 @@ public enum FrameExtractor {
         switch selection {
         case .every(let interval):
             guard interval > 0, interval.isFinite else { throw MediaToolError.invalidRange }
-            let count = Int((duration / interval).rounded(.up))
-            guard count <= maximumFrames else { throw MediaToolError.tooManyFrames(maximumFrames) }
+            let frames = (duration / interval).rounded(.up)
+            guard frames.isFinite, frames <= Double(maximumFrames) else {
+                throw MediaToolError.tooManyFrames(maximumFrames)
+            }
+            let count = Int(frames)
             times = (0..<count).map { Double($0) * interval }.filter { $0 < duration }
         case .count(let count):
             guard count > 0 else { throw MediaToolError.invalidRange }

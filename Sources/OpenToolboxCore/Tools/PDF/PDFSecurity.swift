@@ -5,6 +5,7 @@ public enum PDFPasswordError: Error, Equatable, LocalizedError {
     case emptyPassword
     case passwordsDiffer
     case notProtected(String)
+    case alreadyProtected(String)
     case wrongPassword(String)
     case needsOwnerPassword(String)
 
@@ -13,6 +14,8 @@ public enum PDFPasswordError: Error, Equatable, LocalizedError {
         case .emptyPassword: coreLocalized("Enter a password.")
         case .passwordsDiffer: coreLocalized("The passwords don't match.")
         case .notProtected(let name): coreLocalized("“\(name)” has no password.")
+        case .alreadyProtected(let name):
+            coreLocalized("“\(name)” already has a password or restrictions. Remove them first with its owner password.")
         case .wrongPassword(let name): coreLocalized("The password for “\(name)” is not correct.")
         case .needsOwnerPassword(let name):
             coreLocalized("“\(name)” opened, but removing its restrictions needs the owner password.")
@@ -59,6 +62,7 @@ public enum PDFSecurity {
     {
         guard !protection.openPassword.isEmpty else { throw PDFPasswordError.emptyPassword }
         let document = try PDFTools.open(source)
+        guard !document.isEncrypted else { throw PDFPasswordError.alreadyProtected(source.lastPathComponent) }
         let owner = protection.ownerPassword.isEmpty ? protection.openPassword : protection.ownerPassword
         let options: [PDFDocumentWriteOption: Any] = [
             .userPasswordOption: protection.openPassword,
@@ -72,7 +76,8 @@ public enum PDFSecurity {
         }
     }
 
-    /// Writes an unprotected copy. A PDF that only restricts printing or copying needs its owner password.
+    /// Writes an unprotected copy. Unless the PDF's owner password is given, only PDFs whose
+    /// password unlocks every permission can be unprotected.
     public static func removePassword(_ source: URL, password: String, output: OutputDirectory, tool: ToolID) throws
         -> URL
     {
@@ -81,19 +86,35 @@ public enum PDFSecurity {
         guard document.isEncrypted else { throw PDFPasswordError.notProtected(name) }
         guard !password.isEmpty else { throw PDFPasswordError.emptyPassword }
         guard document.unlock(withPassword: password) else { throw PDFPasswordError.wrongPassword(name) }
-        guard document.permissionsStatus == .owner || !hasRestrictions(document) else {
-            throw PDFPasswordError.needsOwnerPassword(name)
-        }
+        guard document.permissionsStatus == .owner else { throw PDFPasswordError.needsOwnerPassword(name) }
         let copy = PDFTools.extract(Array(0..<document.pageCount), from: document)
         if let attributes = document.documentAttributes { copy.documentAttributes = attributes }
+        if let outline = document.outlineRoot {
+            copy.outlineRoot = copyOutline(outline, from: document, to: copy)
+        }
         let base = source.deletingPathExtension().lastPathComponent
         return try output.writeNewFile(for: tool, preferredName: base + " unlocked.pdf") {
             try PDFTools.write(copy, to: $0)
         }
     }
 
-    static func hasRestrictions(_ document: PDFDocument) -> Bool {
-        !(document.allowsPrinting && document.allowsCopying && document.allowsDocumentChanges
-            && document.allowsDocumentAssembly && document.allowsCommenting && document.allowsFormFieldEntry)
+    /// Rebuilds an outline so its entries point at the matching pages of `copy`.
+    static func copyOutline(_ item: PDFOutline, from source: PDFDocument, to copy: PDFDocument) -> PDFOutline {
+        let result = PDFOutline()
+        result.label = item.label
+        result.isOpen = item.isOpen
+        if let destination = item.destination, let page = destination.page {
+            let index = source.index(for: page)
+            if index >= 0, index < copy.pageCount, let target = copy.page(at: index) {
+                result.destination = PDFDestination(page: target, at: destination.point)
+            }
+        } else if let action = item.action {
+            result.action = action
+        }
+        for index in 0..<item.numberOfChildren {
+            guard let child = item.child(at: index) else { continue }
+            result.insertChild(copyOutline(child, from: source, to: copy), at: result.numberOfChildren)
+        }
+        return result
     }
 }

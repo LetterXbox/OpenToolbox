@@ -28,6 +28,12 @@ An open-source, pure native macOS (Swift / SwiftUI) utility suite designed aroun
 - [x] PDF exports: pin the calendar as well as the date per run, so a time-zone change mid-export cannot split outputs across two dated folders
 - [x] Packaged app records the SDK it was built with, so macOS 26 and later draw it in the current design instead of a compatibility mode that showed a line across the scrolled sidebar
 
+### v0.2 — App Experience & More Built-In Tools
+- [ ] Tools keep their state when you switch to another tool, so long jobs such as a speed test keep running, with progress and a notification when they finish
+- [ ] Menu bar mode, a global hotkey for Quick Open, and launch at login
+- [ ] Watermark images and PDFs (text or image, position, opacity)
+- [ ] Disk Speed Test (sequential read/write on a chosen volume)
+
 ### Phase 2 — On-Demand Media & Archive Engines
 - [ ] `ffmpeg` engine — manifest schema and Engine Manager UI ready; verified builds not pinned yet (Video/Audio Compress, Convert, Trim, Mute, Extract Audio, Video to GIF, Media Info)
 - [ ] `yt-dlp` engine — manifest schema and Engine Manager UI ready; verified builds not pinned yet (Download Video)

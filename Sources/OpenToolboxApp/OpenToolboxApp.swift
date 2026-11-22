@@ -18,6 +18,9 @@ struct OpenToolboxApp: App {
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesButton(updates: appDelegate.updates)
             }
+            CommandGroup(replacing: .appSettings) {
+                SettingsButton()
+            }
             SidebarCommands()
             ImportFromDevicesCommands()
             ToolsCommands(model: model)
@@ -30,12 +33,14 @@ struct OpenToolboxApp: App {
         .windowResizability(.contentSize)
         .restorationBehavior(.disabled)
 
-        Settings {
+        Window(L("OpenToolbox Settings"), id: SettingsWindow.id) {
             SettingsView()
                 .environment(model)
                 .environment(appDelegate.updates)
         }
+        .defaultSize(width: 600, height: 640)
         .windowResizability(.contentMinSize)
+        .restorationBehavior(.disabled)
 
         MenuBarExtra(
             isInserted: Binding(get: { model.showsMenuBarExtra }, set: { model.showsMenuBarExtra = $0 })

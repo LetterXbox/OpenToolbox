@@ -2,6 +2,19 @@ import AppKit
 import OpenToolboxCore
 import SwiftUI
 
+enum SettingsWindow {
+    static let id = "settings"
+}
+
+struct SettingsButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button(L("Settings…")) { openWindow(id: SettingsWindow.id) }
+            .keyboardShortcut(",", modifiers: .command)
+    }
+}
+
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(UpdateCenter.self) private var updates

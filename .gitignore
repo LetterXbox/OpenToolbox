@@ -23,6 +23,5 @@ outputs/
 .env
 .env.*
 
-# Local agent instructions and tool state
-AGENTS.md
+# Local agent tool state
 .claude/

@@ -37,11 +37,13 @@ public struct ParsedTimestamp: Equatable, Sendable {
 public enum TimestampError: Error, Equatable, LocalizedError {
     case empty
     case unrecognized
+    case outOfRange
 
     public var errorDescription: String? {
         switch self {
         case .empty: coreLocalized("Enter a Unix timestamp or a date.")
         case .unrecognized: coreLocalized("Not a recognized timestamp or date format.")
+        case .outOfRange: coreLocalized("This timestamp is outside the supported years 1 to 9999.")
         }
     }
 }
@@ -75,6 +77,15 @@ public struct TimestampRepresentation: Identifiable, Equatable, Sendable {
 }
 
 public enum TimestampConverter {
+    /// Unix seconds the converter can represent: 0001-01-01T00:00:00Z through 9999-12-31T23:59:59Z.
+    /// Keeping inside this range also keeps every millisecond value well within `Int64`.
+    public static let supportedSeconds: ClosedRange<Double> = -62_135_596_800...253_402_300_799
+
+    /// Whether `seconds` is a finite Unix time inside ``supportedSeconds``.
+    public static func isSupported(_ seconds: Double) -> Bool {
+        seconds.isFinite && supportedSeconds.contains(seconds)
+    }
+
     /// Parses a Unix timestamp (unit auto-detected unless given) or a date string.
     /// Date strings without an explicit offset are read in `timeZone`.
     public static func parse(_ input: String, unit: TimestampUnit? = nil, timeZone: TimeZone = .current) throws
@@ -85,9 +96,12 @@ public enum TimestampConverter {
 
         if isNumeric(text), let value = Double(text) {
             let resolvedUnit = unit ?? detectUnit(text)
-            return ParsedTimestamp(date: Date(timeIntervalSince1970: value / resolvedUnit.perSecond), unit: resolvedUnit)
+            let seconds = value / resolvedUnit.perSecond
+            guard isSupported(seconds) else { throw TimestampError.outOfRange }
+            return ParsedTimestamp(date: Date(timeIntervalSince1970: seconds), unit: resolvedUnit)
         }
         if let date = parseDateString(text, timeZone: timeZone) {
+            guard isSupported(date.timeIntervalSince1970) else { throw TimestampError.outOfRange }
             return ParsedTimestamp(date: date, unit: nil)
         }
         throw TimestampError.unrecognized
@@ -104,12 +118,14 @@ public enum TimestampConverter {
         }
     }
 
+    /// Every representation of `date`, or none when it is outside ``supportedSeconds``.
     public static func representations(
         of date: Date,
         timeZone: TimeZone = .current,
         now: Date = Date(),
         locale: Locale = .current
     ) -> [TimestampRepresentation] {
+        guard isSupported(date.timeIntervalSince1970) else { return [] }
         let milliseconds = Int64((date.timeIntervalSince1970 * 1000).rounded())
         let hasFraction = milliseconds % 1000 != 0
         let seconds = hasFraction ? String(format: "%.3f", Double(milliseconds) / 1000) : String(milliseconds / 1000)

@@ -294,6 +294,15 @@ struct BlurFacesView: View {
             FileResultsView(results: results)
         }
         .onChange(of: style) { if preview != nil { makePreview() } }
+        // A preview always describes the current first file and settings, or nothing.
+        .onChange(of: files) { clearPreview() }
+        .onChange(of: strength) { clearPreview() }
+    }
+
+    private func clearPreview() {
+        preview = nil
+        faceCount = nil
+        errorText = nil
     }
 
     private func makePreview() {
@@ -304,13 +313,18 @@ struct BlurFacesView: View {
         Task {
             do {
                 let (box, count) = try await Task.detached(priority: .userInitiated) { () throws -> (ImageBox, Int) in
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    defer { if accessing { url.stopAccessingSecurityScopedResource() } }
                     let image = try ImageProcessor.loadImage(at: url).image
                     let faces = try FaceBlur.detectFaces(in: image)
                     let output = try FaceBlur.anonymize(image, regions: faces, style: style, strength: strength)
                     return (ImageBox(cgImage: output), faces.count)
                 }.value
-                preview = box
-                faceCount = count
+                // Drop a result whose inputs changed while it was computing.
+                if files.first == url, self.style == style, self.strength == strength {
+                    preview = box
+                    faceCount = count
+                }
             } catch {
                 errorText = error.localizedDescription
             }
@@ -324,11 +338,14 @@ struct BlurFacesView: View {
         isProcessing = true
         Task {
             results = await processFiles(files) { url in
-                let image = try ImageProcessor.loadImage(at: url).image
-                let faces = try FaceBlur.detectFaces(in: image)
-                let blurred = ImageBox(cgImage: try FaceBlur.anonymize(image, regions: faces, style: style, strength: strength))
-                let type = UTType(filenameExtension: url.pathExtension)
-                let format = type.flatMap(ImageFormat.init(utType:)).flatMap { ImageFormat.writable.contains($0) ? $0 : nil } ?? .png
+                let loaded = try ImageProcessor.loadImage(at: url)
+                let faces = try FaceBlur.detectFaces(in: loaded.image)
+                // Saving an untouched copy named "blurred" would look like success.
+                guard !faces.isEmpty else { throw VisionToolError.noFacesFound }
+                let blurred = ImageBox(
+                    cgImage: try FaceBlur.anonymize(loaded.image, regions: faces, style: style, strength: strength))
+                let format = loaded.type.flatMap(ImageFormat.init(utType:))
+                    .flatMap { ImageFormat.writable.contains($0) ? $0 : nil } ?? .png
                 let name = url.deletingPathExtension().lastPathComponent + " blurred"
                 return try saveImage(blurred, named: name, format: format, output: output, tool: toolID)
             }
@@ -410,13 +427,7 @@ struct OCRView: View {
 
     nonisolated static func recognize(_ url: URL, accurate: Bool) throws -> String {
         if UTType(filenameExtension: url.pathExtension)?.conforms(to: .pdf) == true {
-            let document = try PDFTools.open(url)
-            let embedded = PDFTools.text(of: document).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !embedded.isEmpty { return embedded }
-            return try (0..<document.pageCount).compactMap { document.page(at: $0) }.map { page in
-                try TextRecognizer.recognize(in: try PDFTools.render(page, dpi: 200), accurate: accurate)
-                    .map(\.text).joined(separator: "\n")
-            }.joined(separator: "\n\n")
+            return try PDFTools.recognizeText(in: try PDFTools.open(url), accurate: accurate)
         }
         let image = try ImageProcessor.loadImage(at: url).image
         return try TextRecognizer.recognize(in: image, accurate: accurate).map(\.text).joined(separator: "\n")

@@ -87,10 +87,78 @@ struct OutputDirectoryTests {
             let output = OutputDirectory(baseDirectory: directory)
             let source = directory.appending(path: "input.heic")
             try Data([1, 2, 3]).write(to: source)
-            let url = try output.outputURL(forSource: source, tool: "image.convert", newExtension: "png")
+            let url = try output.writeOutput(forSource: source, tool: "image.convert", newExtension: "png") {
+                try Data([9]).write(to: $0)
+            }
             #expect(url.lastPathComponent == "input.png")
             #expect(url != source)
+            #expect(try Data(contentsOf: url) == Data([9]))
             #expect(try Data(contentsOf: source) == Data([1, 2, 3]))
+        }
+    }
+
+    @Test func writeNewFileNeverReplacesAFileCreatedMeanwhile() async throws {
+        try await withTemporaryDirectory { directory in
+            // Another export claims the name while this one is still encoding.
+            let url = try OutputDirectory.writeNewFile(in: directory, preferredName: "photo.png") { temporary in
+                try Data("other".utf8).write(to: directory.appending(path: "photo.png"))
+                try Data("mine".utf8).write(to: temporary)
+            }
+            #expect(url.lastPathComponent == "photo 2.png")
+            #expect(try Data(contentsOf: url) == Data("mine".utf8))
+            #expect(try Data(contentsOf: directory.appending(path: "photo.png")) == Data("other".utf8))
+            let names = try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted()
+            #expect(names == ["photo 2.png", "photo.png"])
+        }
+    }
+
+    @Test func concurrentExportsWithTheSameNameAllSurvive() async throws {
+        try await withTemporaryDirectory { directory in
+            let count = 16
+            let urls = try await withThrowingTaskGroup(of: URL.self) { group in
+                for index in 0..<count {
+                    group.addTask {
+                        try OutputDirectory.writeNewFile(in: directory, preferredName: "photo.png") {
+                            try Data("\(index)".utf8).write(to: $0)
+                        }
+                    }
+                }
+                return try await group.reduce(into: [URL]()) { $0.append($1) }
+            }
+            #expect(Set(urls.map(\.lastPathComponent)).count == count)
+            let contents = try Set(urls.map { String(decoding: try Data(contentsOf: $0), as: UTF8.self) })
+            #expect(contents == Set((0..<count).map(String.init)))
+        }
+    }
+
+    @Test func failedWriteLeavesNothingBehind() async throws {
+        struct Failure: Error {}
+        try await withTemporaryDirectory { directory in
+            #expect(throws: Failure.self) {
+                try OutputDirectory.writeNewFile(in: directory, preferredName: "photo.png") { temporary in
+                    try Data("partial".utf8).write(to: temporary)
+                    throw Failure()
+                }
+            }
+            #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+        }
+    }
+
+    @Test func runDirectoryRefusesSymlinkLeadingOutside() async throws {
+        try await withTemporaryDirectory { directory in
+            let base = directory.appending(path: "out")
+            let elsewhere = directory.appending(path: "elsewhere")
+            try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "UTC")!
+            let date = Date(timeIntervalSince1970: 1_700_000_000)
+            try FileManager.default.createSymbolicLink(
+                at: base.appending(path: "2023-11-14"), withDestinationURL: elsewhere)
+            let output = OutputDirectory(baseDirectory: base)
+            #expect(throws: OutputDirectoryError.self) {
+                try output.runDirectory(for: "image.convert", date: date, calendar: calendar)
+            }
         }
     }
 

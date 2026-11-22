@@ -31,12 +31,12 @@ struct JWTDecoderView: View {
                     if let algorithm = jwt.algorithm {
                         Badge(text: L("Algorithm: \(algorithm)"), tint: .blue)
                     }
-                    if jwt.isExpired() {
-                        Badge(text: L("Expired"), tint: .red)
-                    } else if jwt.isNotYetValid() {
-                        Badge(text: L("Not yet valid"), tint: .orange)
-                    } else if jwt.payload["exp"] != nil {
-                        Badge(text: L("Not expired"), tint: .green)
+                    switch jwt.validity() {
+                    case .expired: Badge(text: L("Expired"), tint: .red)
+                    case .notYetValid: Badge(text: L("Not yet valid"), tint: .orange)
+                    case .invalidTimeClaim: Badge(text: L("Invalid exp or nbf claim"), tint: .orange)
+                    case .valid: Badge(text: L("Not expired"), tint: .green)
+                    case .noTimeLimit: EmptyView()
                     }
                     Label(L("Signature not verified"), systemImage: "exclamationmark.shield")
                         .font(.callout)

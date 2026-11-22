@@ -8,9 +8,11 @@ public enum VisionToolError: Error, Equatable, LocalizedError {
     case noSubject
     case noCodeFound
     case renderFailed
+    case noFacesFound
 
     public var errorDescription: String? {
         switch self {
+        case .noFacesFound: coreLocalized("No faces were detected, so no blurred copy was saved.")
         case .noSubject: coreLocalized("No foreground subject was found in this image.")
         case .noCodeFound: coreLocalized("No QR code was found in this image.")
         case .renderFailed: coreLocalized("The image could not be rendered.")
@@ -91,7 +93,9 @@ public enum FaceBlur {
             filter.inputImage = source.clampedToExtent()
             filter.scale = Float(longEdge * 0.04 * amount)
             filter.center = CGPoint(x: extent.midX, y: extent.midY)
-            obscured = (filter.outputImage ?? source).cropped(to: extent)
+            // Fail closed: never return the unobscured image as if it were anonymized.
+            guard let pixelated = filter.outputImage else { throw VisionToolError.renderFailed }
+            obscured = pixelated.cropped(to: extent)
         case .solid:
             obscured = CIImage(color: CIColor(red: 0, green: 0, blue: 0)).cropped(to: extent)
         }

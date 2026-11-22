@@ -2,7 +2,7 @@ import Foundation
 
 /// Line-based diff built on the standard library's Myers implementation (`CollectionDifference`).
 public enum TextDiff {
-    public struct Options: Equatable, Sendable {
+    public struct Options: Hashable, Sendable {
         public var ignoreCase: Bool
         /// Treat lines that differ only in leading/trailing/repeated whitespace as equal.
         public var ignoreWhitespace: Bool

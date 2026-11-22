@@ -214,6 +214,24 @@ struct CSVTests {
         #expect(json == #"[{"x":1,"x_2":2,"column3":3}]"#)
     }
 
+    @Test func generatedKeysNeverCollideWithLiteralHeaders() throws {
+        #expect(CSV.uniqueKeys(["a", "a", "a_2"]) == ["a", "a_3", "a_2"])
+        #expect(CSV.uniqueKeys(["", "column1"]) == ["column1", "column1_2"])
+        let json = try CSV.toJSON("a,a,a_2\n1,2,3", indent: nil)
+        #expect(json == #"[{"a":1,"a_3":2,"a_2":3}]"#)
+    }
+
+    @Test func surplusCellsAreKept() throws {
+        let json = try CSV.toJSON("a,b\n1,2,3\n4", indent: nil)
+        #expect(json == #"[{"a":1,"b":2,"column3":3},{"a":4,"b":null,"column3":null}]"#)
+    }
+
+    @Test func delimiterDetectionIgnoresQuotedSeparators() {
+        #expect(CSV.detectDelimiter("\"Title, with, commas\";b;c\n1;2;3") == ";")
+        #expect(CSV.detectDelimiter("\"a;b;c;d\",x,y\n1,2,3") == ",")
+        #expect(CSV.detectDelimiter("\"multi\nline;;;\",x\n1,2") == ",")
+    }
+
     @Test func fromJSON() throws {
         #expect(try CSV.fromJSON(#"[{"a":1,"b":"x,y"},{"b":"z","c":true}]"#) == "a,b,c\n1,\"x,y\",\n,z,true")
         #expect(try CSV.fromJSON(#"[["a","b"],[1,null]]"#) == "a,b\n1,")
@@ -253,6 +271,36 @@ struct RegexTesterTests {
 
     @Test func replacementTemplates() throws {
         #expect(try RegexTester.replace(#"(?<y>\d{4})-(\d{2})"#, in: "on 2024-05", with: "${y}/$2") == "on 2024/05")
+    }
+
+    @Test func replacementKeepsTextBetweenMatches() throws {
+        #expect(try RegexTester.replace("o", in: "foo bar boo", with: "0") == "f00 bar b00")
+        #expect(try RegexTester.replace("x*", in: "ab", with: "-") == "-a-b-")
+        #expect(try RegexTester.replace(#"\$"#, in: "a$b", with: #"\$\$"#) == "a$$b")
+        #expect(try RegexTester.replace("é", in: "café 🎉 é", with: "e") == "cafe 🎉 e")
+    }
+
+    @Test func catastrophicPatternCanBeAbandoned() throws {
+        // (a+)+$ against "aaaa…b" backtracks exponentially. 27 letters is slow enough
+        // (seconds to minutes) to prove the abort works, yet still finishes if it does not.
+        let text = String(repeating: "a", count: 27) + "b"
+        let deadline = ContinuousClock.now + .milliseconds(100)
+        let started = ContinuousClock.now
+        let result = try RegexTester.search("(a+)+$", in: text, shouldStop: { ContinuousClock.now >= deadline })
+        #expect(!result.isComplete)
+        #expect(result.matches.isEmpty)
+        #expect(ContinuousClock.now - started < .seconds(2))
+        let replaced = try RegexTester.replace(
+            "(a+)+$", in: text, with: "x", shouldStop: { ContinuousClock.now >= deadline })
+        #expect(replaced == nil)
+    }
+
+    @Test func searchReportsTheMatchCap() throws {
+        let text = String(repeating: "a", count: RegexTester.maximumMatches + 5)
+        let result = try RegexTester.search("a", in: text, shouldStop: { false })
+        #expect(result.matches.count == RegexTester.maximumMatches)
+        #expect(!result.isComplete)
+        #expect(try RegexTester.search("a", in: "aaa", shouldStop: { false }).isComplete)
     }
 
     @Test func groupNumbering() {

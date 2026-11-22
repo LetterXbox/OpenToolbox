@@ -41,21 +41,47 @@ public struct DecodedJWT: Equatable, Sendable {
     public var prettyHeader: String { JSONFormatter.serialize(header, indent: .twoSpaces) }
     public var prettyPayload: String { JSONFormatter.serialize(payload, indent: .twoSpaces) }
 
+    /// Time claims holding a usable NumericDate. Invalid ones are reported by ``validity(at:)``.
     public var timeClaims: [JWTTimeClaim] {
         ["iat", "nbf", "exp"].compactMap { name in
-            payload[name]?.doubleValue.map { JWTTimeClaim(name: name, date: Date(timeIntervalSince1970: $0)) }
+            numericDate(name).map { JWTTimeClaim(name: name, date: Date(timeIntervalSince1970: $0)) }
         }
     }
 
     public func isExpired(at now: Date = Date()) -> Bool {
-        guard let exp = payload["exp"]?.doubleValue else { return false }
+        guard let exp = numericDate("exp") else { return false }
         return now.timeIntervalSince1970 >= exp
     }
 
     public func isNotYetValid(at now: Date = Date()) -> Bool {
-        guard let nbf = payload["nbf"]?.doubleValue else { return false }
+        guard let nbf = numericDate("nbf") else { return false }
         return now.timeIntervalSince1970 < nbf
     }
+
+    /// The token's validity window at `now`, judged from `exp` and `nbf` only (not the signature).
+    public func validity(at now: Date = Date()) -> JWTValidity {
+        let claims = ["exp", "nbf"].filter { payload[$0] != nil }
+        if claims.contains(where: { numericDate($0) == nil }) { return .invalidTimeClaim }
+        if isExpired(at: now) { return .expired }
+        if isNotYetValid(at: now) { return .notYetValid }
+        return claims.isEmpty ? .noTimeLimit : .valid
+    }
+
+    /// A claim's value when it is a JSON number inside the supported date range.
+    func numericDate(_ name: String) -> Double? {
+        guard let seconds = payload[name]?.doubleValue, TimestampConverter.isSupported(seconds) else { return nil }
+        return seconds
+    }
+}
+
+public enum JWTValidity: Equatable, Sendable {
+    /// Neither `exp` nor `nbf` is present.
+    case noTimeLimit
+    /// `exp` or `nbf` is present but is not a usable number of seconds.
+    case invalidTimeClaim
+    case expired
+    case notYetValid
+    case valid
 }
 
 /// Decodes JWS compact tokens for inspection. Signatures are never verified.

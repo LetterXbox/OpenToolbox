@@ -201,6 +201,14 @@ struct UUIDTests {
         #expect(info.timestamp?.timeIntervalSince1970 == 1_700_000_000.123)
     }
 
+    @Test func v7ClampsOutOfRangeDates() {
+        var generator = FixedGenerator()
+        let far = UUIDTools.format(UUIDTools.v7(date: Date(timeIntervalSince1970: 1e300), using: &generator))
+        #expect(far.hasPrefix("ffffffff-ffff-7"))
+        let past = UUIDTools.format(UUIDTools.v7(date: Date(timeIntervalSince1970: -1e300), using: &generator))
+        #expect(past.hasPrefix("00000000-0000-7"))
+    }
+
     @Test func v7IsSortableByTime() {
         let earlier = UUIDTools.format(UUIDTools.v7(date: Date(timeIntervalSince1970: 1_000)))
         let later = UUIDTools.format(UUIDTools.v7(date: Date(timeIntervalSince1970: 2_000)))
@@ -267,6 +275,27 @@ struct JWTTests {
         #expect(throws: JWTDecodeError.self) { try JWTDecoder.decode("!!!.e30.sig") }
     }
 
+    /// An unsecured token with the given JSON payload.
+    static func unsecured(_ payload: String) -> String {
+        let encoded = Data(payload.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        return "eyJhbGciOiJub25lIn0.\(encoded)."
+    }
+
+    @Test func validityDistinguishesMissingInvalidAndExpiredClaims() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        #expect(try JWTDecoder.decode(Self.unsecured(#"{"sub":"a"}"#)).validity(at: now) == .noTimeLimit)
+        #expect(try JWTDecoder.decode(Self.unsecured(#"{"exp":"unknown"}"#)).validity(at: now) == .invalidTimeClaim)
+        #expect(try JWTDecoder.decode(Self.unsecured(#"{"exp":1e300}"#)).validity(at: now) == .invalidTimeClaim)
+        #expect(try JWTDecoder.decode(Self.unsecured(#"{"nbf":true,"exp":1800000000}"#)).validity(at: now) == .invalidTimeClaim)
+        #expect(try JWTDecoder.decode(Self.unsecured(#"{"exp":1600000000}"#)).validity(at: now) == .expired)
+        #expect(try JWTDecoder.decode(Self.unsecured(#"{"nbf":1800000000}"#)).validity(at: now) == .notYetValid)
+        #expect(try JWTDecoder.decode(Self.unsecured(#"{"exp":1800000000}"#)).validity(at: now) == .valid)
+        // Out-of-range numbers never become displayable dates.
+        #expect(try JWTDecoder.decode(Self.unsecured(#"{"iat":1e300}"#)).timeClaims.isEmpty)
+    }
+
     @Test func acceptsUnsecuredTokens() throws {
         // {"alg":"none"} . {} . (empty signature)
         let jwt = try JWTDecoder.decode("eyJhbGciOiJub25lIn0.e30.")
@@ -311,6 +340,23 @@ struct TimestampTests {
         #expect(throws: TimestampError.empty) { try TimestampConverter.parse(" ") }
         #expect(throws: TimestampError.unrecognized) { try TimestampConverter.parse("yesterday-ish") }
         #expect(throws: TimestampError.unrecognized) { try TimestampConverter.parse("12.") }
+    }
+
+    @Test func rejectsTimestampsOutsideTheSupportedRange() throws {
+        // Previously trapped converting milliseconds to Int64 while rendering.
+        #expect(throws: TimestampError.outOfRange) {
+            try TimestampConverter.parse("10000000000000000", unit: .seconds)
+        }
+        #expect(throws: TimestampError.outOfRange) {
+            try TimestampConverter.parse("-99999999999999", unit: .seconds)
+        }
+        // 400 digits overflow Double; whichever way it is rejected, it must not trap.
+        #expect(throws: TimestampError.self) {
+            try TimestampConverter.parse(String(repeating: "9", count: 400))
+        }
+        #expect(try TimestampConverter.parse("253402300799", unit: .seconds).date.timeIntervalSince1970 == 253_402_300_799)
+        #expect(TimestampConverter.representations(of: Date(timeIntervalSince1970: 1e16)).isEmpty)
+        #expect(TimestampConverter.representations(of: .distantFuture).isEmpty == false)
     }
 
     @Test func representations() {

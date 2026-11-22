@@ -8,9 +8,17 @@ struct DiffCheckerView: View {
     @State private var original = ""
     @State private var changed = ""
     @State private var options = TextDiff.Options()
+    /// Computed off the main actor whenever the inputs settle.
+    @State private var lines: [TextDiff.Line] = []
+    @State private var isComparing = false
+
+    private struct Input: Equatable {
+        var original: String
+        var changed: String
+        var options: TextDiff.Options
+    }
 
     var body: some View {
-        let lines = TextDiff.diff(original, changed, options: options)
         let summary = TextDiff.summary(of: lines)
         ToolPage(tool: tool) {
             HStack(alignment: .top, spacing: 16) {
@@ -27,7 +35,9 @@ struct DiffCheckerView: View {
                 Toggle(L("Ignore case"), isOn: $options.ignoreCase)
                 Toggle(L("Ignore whitespace"), isOn: $options.ignoreWhitespace)
                 Spacer()
-                if !lines.isEmpty {
+                if isComparing {
+                    ProgressView().controlSize(.small)
+                } else if !lines.isEmpty {
                     if summary.isIdentical {
                         Label(L("No differences"), systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
@@ -48,6 +58,16 @@ struct DiffCheckerView: View {
             }
             .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
+        }
+        .task(id: Input(original: original, changed: changed, options: options)) {
+            let original = self.original, changed = self.changed, options = self.options
+            isComparing = true
+            guard await debounce() else { return }
+            let computed = await runOffMain { TextDiff.diff(original, changed, options: options) }
+            // A newer input replaced this task; its own run will publish.
+            guard !Task.isCancelled else { return }
+            lines = computed
+            isComparing = false
         }
     }
 }
@@ -100,11 +120,31 @@ struct RegexTesterView: View {
     @State private var text = ""
     @State private var replacement = ""
     @State private var options: RegexTester.Options = []
+    /// Computed off the main actor whenever the inputs settle.
+    @State private var output: Output?
+    @State private var isSearching = false
+
+    /// How long one evaluation may run before it is abandoned.
+    static let timeLimit: Duration = .seconds(2)
+
+    private struct Input: Equatable {
+        var pattern: String
+        var text: String
+        var replacement: String
+        var options: RegexTester.Options
+    }
+
+    private struct Output: Sendable {
+        /// The text the match ranges belong to.
+        var text: String
+        var search: Result<RegexTester.SearchResult, any Error>
+        var replaced: String?
+    }
 
     var body: some View {
-        let pattern = self.pattern, text = self.text, options = self.options
-        let result = Swift.Result { try RegexTester.matches(pattern, in: text, options: options) }
-        let matches = (try? result.get()) ?? []
+        let pattern = self.pattern, text = self.text
+        let search = output.flatMap { try? $0.search.get() }
+        let matches = output?.text == text ? (search?.matches ?? []) : []
         ToolPage(tool: tool) {
             TextField(L("Regular expression"), text: $pattern)
                 .textFieldStyle(.roundedBorder)
@@ -115,11 +155,19 @@ struct RegexTesterView: View {
                 optionToggle(L("Dot matches newline"), .dotMatchesNewlines)
                 optionToggle(L("Extended"), .extended)
                 Spacer()
-                if !pattern.isEmpty, case .success = result {
-                    Text(L("\(matches.count) matches")).foregroundStyle(.secondary)
+                if isSearching {
+                    ProgressView().controlSize(.small)
+                } else if !pattern.isEmpty, let search {
+                    if search.isComplete {
+                        Text(L("\(search.matches.count) matches")).foregroundStyle(.secondary)
+                    } else {
+                        Text(L("Stopped early after \(search.matches.count) matches"))
+                            .foregroundStyle(.orange)
+                            .help(L("The search hit the time limit or the 10,000-match cap."))
+                    }
                 }
             }
-            if !pattern.isEmpty, case .failure(let error) = result {
+            if !pattern.isEmpty, case .failure(let error)? = output?.search {
                 ErrorMessage(text: error.localizedDescription)
             }
 
@@ -168,15 +216,40 @@ struct RegexTesterView: View {
                 TextField(L("Replacement ($1, ${name})"), text: $replacement)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
-                if !pattern.isEmpty, !replacement.isEmpty,
-                    let replaced = try? RegexTester.replace(pattern, in: text, with: replacement, options: options)
-                {
+                if !pattern.isEmpty, !replacement.isEmpty, let replaced = output?.replaced {
                     HStack(alignment: .top) {
                         CodeOutput(text: replaced).frame(maxHeight: 120)
                         CopyButton(text: replaced)
                     }
                 }
             }
+        }
+        .task(id: Input(pattern: pattern, text: text, replacement: replacement, options: options)) {
+            let pattern = self.pattern, text = self.text, replacement = self.replacement, options = self.options
+            guard !pattern.isEmpty else {
+                output = nil
+                isSearching = false
+                return
+            }
+            isSearching = true
+            guard await debounce() else { return }
+            let timeLimit = Self.timeLimit
+            let computed = await runOffMain { () -> Output in
+                let deadline = ContinuousClock.now + timeLimit
+                let shouldStop = { Task.isCancelled || ContinuousClock.now >= deadline }
+                let search = Result<RegexTester.SearchResult, any Error> {
+                    try RegexTester.search(pattern, in: text, options: options, shouldStop: shouldStop)
+                }
+                var replaced: String?
+                if !replacement.isEmpty, case .success = search {
+                    replaced = try? RegexTester.replace(
+                        pattern, in: text, with: replacement, options: options, shouldStop: shouldStop)
+                }
+                return Output(text: text, search: search, replaced: replaced)
+            }
+            guard !Task.isCancelled else { return }
+            output = computed
+            isSearching = false
         }
     }
 

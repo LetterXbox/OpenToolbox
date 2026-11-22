@@ -131,9 +131,9 @@ struct PDFOrganizeView: View {
     ) throws -> [URL] {
         let directory = try output.runDirectory(for: tool)
         func save(_ document: PDFDocument, _ name: String) throws -> URL {
-            let url = OutputDirectory.uniqueFileURL(in: directory, preferredName: name + ".pdf")
-            try PDFTools.write(document, to: url)
-            return url
+            try OutputDirectory.writeNewFile(in: directory, preferredName: name + ".pdf") {
+                try PDFTools.write(document, to: $0)
+            }
         }
         let base = files[0].deletingPathExtension().lastPathComponent
         switch mode {
@@ -275,8 +275,9 @@ struct ImagesPDFView: View {
                     case .imagesToPDF:
                         let cgImages = try images.map { try ImageProcessor.loadImage(at: $0).image }
                         let document = PDFTools.makePDF(fromImages: cgImages, pageSize: pageSize)
-                        let url = OutputDirectory.uniqueFileURL(in: directory, preferredName: base + ".pdf")
-                        try PDFTools.write(document, to: url)
+                        let url = try OutputDirectory.writeNewFile(in: directory, preferredName: base + ".pdf") {
+                            try PDFTools.write(document, to: $0)
+                        }
                         return [FileResult(source: first, output: url, error: nil)]
                     case .pdfToImages:
                         let document = try PDFTools.open(first)
@@ -284,9 +285,11 @@ struct ImagesPDFView: View {
                         return try pages.compactMap { index -> FileResult? in
                             guard let page = document.page(at: index) else { return nil }
                             let image = try PDFTools.render(page, dpi: CGFloat(dpi))
-                            let url = OutputDirectory.uniqueFileURL(
-                                in: directory, preferredName: "\(base) page \(index + 1).\(format.fileExtension)")
-                            try ImageProcessor.write(image, to: url, format: format, quality: 0.9)
+                            let url = try OutputDirectory.writeNewFile(
+                                in: directory, preferredName: "\(base) page \(index + 1).\(format.fileExtension)"
+                            ) {
+                                try ImageProcessor.write(image, to: $0, format: format, quality: 0.9)
+                            }
                             return FileResult(source: first, output: url, error: nil)
                         }
                     }

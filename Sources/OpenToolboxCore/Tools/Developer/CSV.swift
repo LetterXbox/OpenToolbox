@@ -76,13 +76,26 @@ public enum CSV {
         return rows
     }
 
-    /// Picks the most likely delimiter among `,`, `;`, tab, and `|` from the first line.
+    /// Picks the most likely delimiter among `,`, `;`, tab, and `|` from the first record,
+    /// counting only separators outside quoted fields.
     public static func detectDelimiter(_ text: String) -> Character {
-        let firstLine = text.prefix { !$0.isNewline }
         let candidates: [Character] = [",", ";", "\t", "|"]
-        return candidates.max { a, b in
-            firstLine.filter { $0 == a }.count < firstLine.filter { $0 == b }.count
-        } ?? ","
+        var counts: [Character: Int] = [:]
+        var inQuotes = false
+        for character in text {
+            if character == "\"" {
+                inQuotes.toggle()
+            } else if !inQuotes {
+                if character.isNewline { break }
+                if candidates.contains(character) { counts[character, default: 0] += 1 }
+            }
+        }
+        // Ties keep the earlier candidate, so a line with no separators stays comma-delimited.
+        var best: Character = ","
+        for candidate in candidates where counts[candidate, default: 0] > counts[best, default: 0] {
+            best = candidate
+        }
+        return best
     }
 
     public static func write(_ rows: [[String]], delimiter: Character = ",") -> String {
@@ -120,7 +133,9 @@ public enum CSV {
         let rows = try parse(text, delimiter: delimiter ?? detectDelimiter(text))
         let value: JSONValue
         if options.firstRowIsHeader, let header = rows.first {
-            let keys = uniqueKeys(header)
+            // Rows wider than the header keep their extra cells under generated column names.
+            let width = rows.map(\.count).max() ?? header.count
+            let keys = uniqueKeys(header + Array(repeating: "", count: max(0, width - header.count)))
             value = .array(
                 rows.dropFirst().map { row -> JSONValue in
                     JSONValue.object(
@@ -159,14 +174,23 @@ public enum CSV {
         return write(rows, delimiter: delimiter)
     }
 
+    /// Object keys for a header row, all distinct. The first occurrence of each name keeps it;
+    /// later duplicates get `_2`, `_3`, … skipping any name already used anywhere in the header.
     static func uniqueKeys(_ header: [String]) -> [String] {
-        var counts: [String: Int] = [:]
-        return header.enumerated().map { index, raw in
-            let base = raw.isEmpty ? "column\(index + 1)" : raw
-            let count = counts[base, default: 0] + 1
-            counts[base] = count
-            return count == 1 ? base : "\(base)_\(count)"
+        let bases = header.enumerated().map { index, raw in raw.isEmpty ? "column\(index + 1)" : raw }
+        var used = Set<String>()
+        var keys = [String?](repeating: nil, count: bases.count)
+        for (index, base) in bases.enumerated() where used.insert(base).inserted {
+            keys[index] = base
         }
+        for (index, base) in bases.enumerated() where keys[index] == nil {
+            var counter = 2
+            while used.contains("\(base)_\(counter)") { counter += 1 }
+            let key = "\(base)_\(counter)"
+            used.insert(key)
+            keys[index] = key
+        }
+        return keys.map { $0 ?? "" }
     }
 
     static func cell(_ text: String, infer: Bool) -> JSONValue {

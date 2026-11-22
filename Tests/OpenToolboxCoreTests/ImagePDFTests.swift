@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import CoreText
 import Foundation
@@ -113,6 +114,73 @@ struct ImageProcessorTests {
         }
     }
 
+    @Test func removeLocationStripsIPTCPlaceNames() async throws {
+        try await withTemporaryDirectory { directory in
+            let source = directory.appending(path: "place.jpg")
+            let destination = try #require(
+                CGImageDestinationCreateWithURL(source as CFURL, "public.jpeg" as CFString, 1, nil))
+            let iptc: [CFString: Any] = [
+                kCGImagePropertyIPTCCity: "Paris",
+                kCGImagePropertyIPTCSubLocation: "Louvre",
+                kCGImagePropertyIPTCProvinceState: "Île-de-France",
+                kCGImagePropertyIPTCCountryPrimaryLocationName: "France",
+                kCGImagePropertyIPTCCountryPrimaryLocationCode: "FRA",
+                kCGImagePropertyIPTCCaptionAbstract: "A test caption",
+            ]
+            CGImageDestinationAddImage(
+                destination, try makeTestImage(width: 32, height: 32),
+                [kCGImagePropertyIPTCDictionary: iptc] as CFDictionary)
+            #expect(CGImageDestinationFinalize(destination))
+            let original = try #require(
+                ImageProcessor.properties(of: source)[kCGImagePropertyIPTCDictionary] as? [CFString: Any])
+            #expect(original[kCGImagePropertyIPTCCity] as? String == "Paris")
+            #expect(ImageProcessor.metadataSummary(ImageProcessor.properties(of: source)).map(\.label).contains("Location"))
+
+            let noLocation = directory.appending(path: "no-location.jpg")
+            try ImageProcessor.process(
+                source: source, destination: noLocation, options: ImageEditOptions(metadata: .removeLocation))
+            let kept = ImageProcessor.properties(of: noLocation)
+            let keptIPTC = kept[kCGImagePropertyIPTCDictionary] as? [CFString: Any] ?? [:]
+            for key in [
+                kCGImagePropertyIPTCCity, kCGImagePropertyIPTCSubLocation, kCGImagePropertyIPTCProvinceState,
+                kCGImagePropertyIPTCCountryPrimaryLocationName, kCGImagePropertyIPTCCountryPrimaryLocationCode,
+            ] {
+                #expect(keptIPTC[key] == nil, "\(key) survived")
+            }
+            #expect(keptIPTC[kCGImagePropertyIPTCCaptionAbstract] as? String == "A test caption")
+            #expect(!ImageProcessor.metadataSummary(kept).map(\.label).contains("Location"))
+
+            let clean = directory.appending(path: "clean.jpg")
+            try ImageProcessor.process(source: source, destination: clean, options: ImageEditOptions(metadata: .removeAll))
+            let cleanIPTC = ImageProcessor.properties(of: clean)[kCGImagePropertyIPTCDictionary] as? [CFString: Any]
+            #expect(cleanIPTC?.isEmpty ?? true)
+        }
+    }
+
+    @Test func iptcLocationKeysAreRecognized() {
+        #expect(ImageProcessor.isIPTCLocationKey(kCGImagePropertyIPTCCity))
+        #expect(ImageProcessor.isIPTCLocationKey(kCGImagePropertyIPTCSubLocation))
+        #expect(ImageProcessor.isIPTCLocationKey(kCGImagePropertyIPTCCountryPrimaryLocationName))
+        #expect(ImageProcessor.isIPTCLocationKey(kCGImagePropertyIPTCContentLocationName))
+        #expect(!ImageProcessor.isIPTCLocationKey(kCGImagePropertyIPTCCaptionAbstract))
+        #expect(!ImageProcessor.isIPTCLocationKey(kCGImagePropertyIPTCKeywords))
+        #expect(!ImageProcessor.isIPTCLocationKey(kCGImagePropertyIPTCContactInfo))
+    }
+
+    @Test func keepFormatUsesTheRealTypeNotTheFileName() async throws {
+        try await withTemporaryDirectory { directory in
+            // JPEG bytes behind a .png name.
+            let source = directory.appending(path: "photo.png")
+            try writeJPEGWithMetadata(try makeTestImage(width: 20, height: 20), to: source)
+            let output = OutputDirectory(baseDirectory: directory.appending(path: "out"))
+            let result = try ImageProcessor.process(
+                source: source, options: ImageEditOptions(), output: output, tool: "image.convert")
+            #expect(result.lastPathComponent == "photo.jpg")
+            let written = try #require(CGImageSourceCreateWithURL(result as CFURL, nil))
+            #expect(CGImageSourceGetType(written) as String? == "public.jpeg")
+        }
+    }
+
     @Test func metadataSummary() async throws {
         try await withTemporaryDirectory { directory in
             let source = directory.appending(path: "geo.jpg")
@@ -207,6 +275,43 @@ struct PDFToolTests {
     }
 
     /// PDF rotation is clockwise; the red marker starts in the page's top-left corner.
+    @Test func recognizeTextReadsEmbeddedAndScannedPages() async throws {
+        try await withTemporaryDirectory { directory in
+            // Page 1 carries real (selectable) text drawn into a PDF context.
+            let url = directory.appending(path: "cover.pdf")
+            var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+            let context = try #require(CGContext(url as CFURL, mediaBox: &box, nil))
+            context.beginPDFPage(nil)
+            let font = CTFontCreateWithName("Helvetica" as CFString, 36, nil)
+            let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key(kCTFontAttributeName as String): font]
+            let line = CTLineCreateWithAttributedString(NSAttributedString(string: "Embedded cover", attributes: attributes))
+            context.textPosition = CGPoint(x: 72, y: 700)
+            CTLineDraw(line, context)
+            context.endPDFPage()
+            context.closePDF()
+
+            let document = try PDFTools.open(url)
+            #expect(document.page(at: 0)?.string?.contains("Embedded cover") == true)
+            // Page 2 is image-only, like a scan.
+            let scan = try makeTestImage(width: 900, height: 200, text: "SCANNED PAGE", fontSize: 64)
+            let scanPage = try #require(PDFPage(image: NSImage(cgImage: scan, size: NSSize(width: 450, height: 100))))
+            document.insert(scanPage, at: 1)
+
+            let text = try PDFTools.recognizeText(in: document).uppercased()
+            #expect(text.contains("EMBEDDED COVER"))
+            #expect(text.contains("SCANNED"))
+            let cover = try #require(text.range(of: "EMBEDDED"))
+            let scanned = try #require(text.range(of: "SCANNED"))
+            #expect(cover.lowerBound < scanned.lowerBound)
+        }
+    }
+
+    @Test func renderRefusesHugePageBoxes() throws {
+        let page = PDFPage()
+        page.setBounds(CGRect(x: 0, y: 0, width: 1e30, height: 1e30), for: .mediaBox)
+        #expect(throws: PDFToolError.pageTooLarge) { try PDFTools.render(page, dpi: 144) }
+    }
+
     @Test func renderHonorsPageRotation() throws {
         let rotated = PDFTools.rotate([0], by: 90, in: try sampleDocument(pages: 1))
         let page = try #require(rotated.page(at: 0))

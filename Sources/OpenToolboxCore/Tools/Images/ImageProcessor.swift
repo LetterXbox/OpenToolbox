@@ -79,7 +79,7 @@ public struct ImageEditOptions: Equatable, Sendable {
     public enum Metadata: Equatable, Sendable {
         /// Keep camera and descriptive metadata.
         case keep
-        /// Keep everything except GPS location.
+        /// Keep everything except GPS coordinates and IPTC place names.
         case removeLocation
         /// Write pixels only.
         case removeAll
@@ -137,22 +137,40 @@ public enum ImageProcessor {
 
     /// Converts `source` with `options` and writes the result to `destination`.
     public static func process(source: URL, destination: URL, options: ImageEditOptions) throws {
+        let prepared = try prepare(source: source, options: options)
+        try prepared.write(to: destination)
+    }
+
+    /// Converts into the dated output folder and returns the new file's URL.
+    /// The file extension follows the format actually encoded, not the source's name.
+    public static func process(
+        source: URL, options: ImageEditOptions, output: OutputDirectory, tool: ToolID
+    ) throws -> URL {
+        let prepared = try prepare(source: source, options: options)
+        return try output.writeOutput(forSource: source, tool: tool, newExtension: prepared.format.fileExtension) {
+            try prepared.write(to: $0)
+        }
+    }
+
+    /// A rendered image with the format and metadata it will be encoded with.
+    struct PreparedImage {
+        let image: CGImage
+        let format: ImageFormat
+        let quality: Double
+        let metadata: [CFString: Any]
+
+        func write(to url: URL) throws {
+            try ImageProcessor.write(image, to: url, format: format, quality: quality, metadata: metadata)
+        }
+    }
+
+    /// Resolves the output format once, from the decoded image's real type.
+    static func prepare(source: URL, options: ImageEditOptions) throws -> PreparedImage {
         let loaded = try loadImage(at: source)
         let format = resolvedFormat(options.format, sourceType: loaded.type)
         let rendered = try render(loaded.image, options: options, opaque: !format.supportsAlpha)
         let metadata = filteredMetadata(loaded.properties, mode: options.metadata)
-        try write(rendered, to: destination, format: format, quality: options.quality, metadata: metadata)
-    }
-
-    /// Converts into the dated output folder and returns the new file's URL.
-    public static func process(
-        source: URL, options: ImageEditOptions, output: OutputDirectory, tool: ToolID
-    ) throws -> URL {
-        let type = UTType(filenameExtension: source.pathExtension)
-        let format = resolvedFormat(options.format, sourceType: type)
-        let destination = try output.outputURL(forSource: source, tool: tool, newExtension: format.fileExtension)
-        try process(source: source, destination: destination, options: options)
-        return destination
+        return PreparedImage(image: rendered, format: format, quality: options.quality, metadata: metadata)
     }
 
     static func resolvedFormat(_ requested: ImageFormat?, sourceType: UTType?) -> ImageFormat {
@@ -225,13 +243,35 @@ public enum ImageProcessor {
         for key in carried {
             if let value = properties[key] { result[key] = value }
         }
-        if mode == .removeLocation { result[kCGImagePropertyGPSDictionary] = nil }
+        if mode == .removeLocation {
+            result[kCGImagePropertyGPSDictionary] = nil
+            if let iptc = result[kCGImagePropertyIPTCDictionary] as? [CFString: Any] {
+                let remaining = iptc.filter { !isIPTCLocationKey($0.key) }
+                result[kCGImagePropertyIPTCDictionary] = remaining.isEmpty ? nil : remaining
+            }
+        }
         if var tiff = result[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
             tiff[kCGImagePropertyTIFFOrientation] = 1
             result[kCGImagePropertyTIFFDictionary] = tiff
         }
         result[kCGImagePropertyOrientation] = 1
         return result
+    }
+
+    /// IPTC fields that name a place: City, Sub-location, Province/State, Country/Primary
+    /// Location Code and Name, and the IPTC Extension Location Created / Location Shown
+    /// structures. Matched by name so every ImageIO spelling of those fields is covered.
+    /// The creator's own contact address lives in the nested contact-info dictionary and is
+    /// not a photo location.
+    static func isIPTCLocationKey(_ key: CFString) -> Bool {
+        let name = (key as String).lowercased()
+        return ["city", "location", "province", "country", "worldregion"].contains { name.contains($0) }
+    }
+
+    /// Whether the IPTC dictionary names a place.
+    static func hasIPTCLocation(_ properties: [CFString: Any]) -> Bool {
+        guard let iptc = properties[kCGImagePropertyIPTCDictionary] as? [CFString: Any] else { return false }
+        return iptc.keys.contains(where: isIPTCLocationKey)
     }
 
     public static func write(
@@ -280,6 +320,8 @@ public enum ImageProcessor {
         }
         if let gps = properties[kCGImagePropertyGPSDictionary] as? [CFString: Any], !gps.isEmpty {
             rows.append((coreLocalized("Location"), coreLocalized("Embedded GPS coordinates")))
+        } else if hasIPTCLocation(properties) {
+            rows.append((coreLocalized("Location"), coreLocalized("Embedded place names")))
         }
         return rows
     }

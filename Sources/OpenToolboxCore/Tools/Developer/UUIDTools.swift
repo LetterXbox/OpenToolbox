@@ -55,7 +55,9 @@ public enum UUIDTools {
 
     /// RFC 9562 UUIDv7: 48-bit Unix milliseconds, version 7, then 74 random bits.
     public static func v7(date: Date, using generator: inout some RandomNumberGenerator) -> UUID {
-        let milliseconds = UInt64(max(0, (date.timeIntervalSince1970 * 1000).rounded(.down))) & 0xFFFF_FFFF_FFFF
+        // Clamp to the 48-bit field before converting so out-of-range dates cannot trap.
+        let raw = (date.timeIntervalSince1970 * 1000).rounded(.down)
+        let milliseconds: UInt64 = raw.isFinite ? UInt64(min(max(0, raw), Double(0xFFFF_FFFF_FFFF))) : 0
         var bytes = [UInt8](repeating: 0, count: 16)
         for index in 0..<6 {
             bytes[index] = UInt8(truncatingIfNeeded: milliseconds >> (8 * (5 - index)))

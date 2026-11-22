@@ -72,39 +72,45 @@ public enum UnicodeInspector {
         }
     }
 
+    /// `Lu · Uppercase letter`: the standard code stays verbatim, the description is localized.
     static func categoryName(_ category: Unicode.GeneralCategory) -> String {
+        let (code, description) = categoryParts(category)
+        return code.isEmpty ? description : "\(code) · \(description)"
+    }
+
+    static func categoryParts(_ category: Unicode.GeneralCategory) -> (code: String, description: String) {
         switch category {
-        case .uppercaseLetter: "Lu · Uppercase letter"
-        case .lowercaseLetter: "Ll · Lowercase letter"
-        case .titlecaseLetter: "Lt · Titlecase letter"
-        case .modifierLetter: "Lm · Modifier letter"
-        case .otherLetter: "Lo · Other letter"
-        case .nonspacingMark: "Mn · Nonspacing mark"
-        case .spacingMark: "Mc · Spacing mark"
-        case .enclosingMark: "Me · Enclosing mark"
-        case .decimalNumber: "Nd · Decimal number"
-        case .letterNumber: "Nl · Letter number"
-        case .otherNumber: "No · Other number"
-        case .connectorPunctuation: "Pc · Connector punctuation"
-        case .dashPunctuation: "Pd · Dash punctuation"
-        case .openPunctuation: "Ps · Open punctuation"
-        case .closePunctuation: "Pe · Close punctuation"
-        case .initialPunctuation: "Pi · Initial punctuation"
-        case .finalPunctuation: "Pf · Final punctuation"
-        case .otherPunctuation: "Po · Other punctuation"
-        case .mathSymbol: "Sm · Math symbol"
-        case .currencySymbol: "Sc · Currency symbol"
-        case .modifierSymbol: "Sk · Modifier symbol"
-        case .otherSymbol: "So · Other symbol"
-        case .spaceSeparator: "Zs · Space separator"
-        case .lineSeparator: "Zl · Line separator"
-        case .paragraphSeparator: "Zp · Paragraph separator"
-        case .control: "Cc · Control"
-        case .format: "Cf · Format"
-        case .surrogate: "Cs · Surrogate"
-        case .privateUse: "Co · Private use"
-        case .unassigned: "Cn · Unassigned"
-        @unknown default: "Unknown"
+        case .uppercaseLetter: ("Lu", coreLocalized("Uppercase letter"))
+        case .lowercaseLetter: ("Ll", coreLocalized("Lowercase letter"))
+        case .titlecaseLetter: ("Lt", coreLocalized("Titlecase letter"))
+        case .modifierLetter: ("Lm", coreLocalized("Modifier letter"))
+        case .otherLetter: ("Lo", coreLocalized("Other letter"))
+        case .nonspacingMark: ("Mn", coreLocalized("Nonspacing mark"))
+        case .spacingMark: ("Mc", coreLocalized("Spacing mark"))
+        case .enclosingMark: ("Me", coreLocalized("Enclosing mark"))
+        case .decimalNumber: ("Nd", coreLocalized("Decimal number"))
+        case .letterNumber: ("Nl", coreLocalized("Letter number"))
+        case .otherNumber: ("No", coreLocalized("Other number"))
+        case .connectorPunctuation: ("Pc", coreLocalized("Connector punctuation"))
+        case .dashPunctuation: ("Pd", coreLocalized("Dash punctuation"))
+        case .openPunctuation: ("Ps", coreLocalized("Open punctuation"))
+        case .closePunctuation: ("Pe", coreLocalized("Close punctuation"))
+        case .initialPunctuation: ("Pi", coreLocalized("Initial punctuation"))
+        case .finalPunctuation: ("Pf", coreLocalized("Final punctuation"))
+        case .otherPunctuation: ("Po", coreLocalized("Other punctuation"))
+        case .mathSymbol: ("Sm", coreLocalized("Math symbol"))
+        case .currencySymbol: ("Sc", coreLocalized("Currency symbol"))
+        case .modifierSymbol: ("Sk", coreLocalized("Modifier symbol"))
+        case .otherSymbol: ("So", coreLocalized("Other symbol"))
+        case .spaceSeparator: ("Zs", coreLocalized("Space separator"))
+        case .lineSeparator: ("Zl", coreLocalized("Line separator"))
+        case .paragraphSeparator: ("Zp", coreLocalized("Paragraph separator"))
+        case .control: ("Cc", coreLocalized("Control"))
+        case .format: ("Cf", coreLocalized("Format"))
+        case .surrogate: ("Cs", coreLocalized("Surrogate"))
+        case .privateUse: ("Co", coreLocalized("Private use"))
+        case .unassigned: ("Cn", coreLocalized("Unassigned"))
+        @unknown default: ("", coreLocalized("Unknown category"))
         }
     }
 }

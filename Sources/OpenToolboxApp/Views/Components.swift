@@ -2,6 +2,23 @@ import AppKit
 import OpenToolboxCore
 import SwiftUI
 
+/// Runs `work` off the main actor. Cancelling the calling task (for example a `.task(id:)`
+/// whose input changed) cancels `work` too, so it can stop early via `Task.isCancelled`.
+func runOffMain<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+    let task = Task.detached(priority: .userInitiated) { work() }
+    return await withTaskCancellationHandler {
+        await task.value
+    } onCancel: {
+        task.cancel()
+    }
+}
+
+/// Short pause before recomputing from typed input, so work runs once typing settles.
+/// Returns `false` when the input changed again during the pause.
+func debounce() async -> Bool {
+    (try? await Task.sleep(for: .milliseconds(200))) != nil
+}
+
 /// Standard page layout for a tool: header plus content.
 struct ToolPage<Content: View>: View {
     let tool: ToolDescriptor

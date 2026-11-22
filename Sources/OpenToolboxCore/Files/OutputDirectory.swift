@@ -1,18 +1,19 @@
+import Darwin
 import Foundation
 
 public enum OutputDirectoryError: Error, Equatable, LocalizedError {
-    case wouldOverwriteSource(URL)
+    case outsideOutputFolder(URL)
 
     public var errorDescription: String? {
         switch self {
-        case .wouldOverwriteSource(let url):
-            coreLocalized("Refusing to overwrite the original file “\(url.lastPathComponent)”.")
+        case .outsideOutputFolder(let url):
+            coreLocalized("The folder “\(url.lastPathComponent)” leads outside the chosen output folder.")
         }
     }
 }
 
 /// Where file tools write results. Originals are never overwritten: every run
-/// writes into `<base>/<yyyy-MM-dd>/<tool>/` and picks a free file name.
+/// writes into `<base>/<yyyy-MM-dd>/<tool>/` and publishes under a free file name.
 public struct OutputDirectory: Sendable {
     public let baseDirectory: URL
 
@@ -27,7 +28,8 @@ public struct OutputDirectory: Sendable {
         return downloads.appending(path: "OpenToolbox", directoryHint: .isDirectory)
     }
 
-    /// The dated folder for a tool run; created if needed.
+    /// The dated folder for a tool run; created if needed. Refuses a dated folder that a
+    /// symlink redirects outside the output folder.
     public func runDirectory(
         for tool: ToolID,
         date: Date = Date(),
@@ -35,6 +37,11 @@ public struct OutputDirectory: Sendable {
     ) throws -> URL {
         let directory = directoryURL(for: tool, date: date, calendar: calendar)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let base = baseDirectory.standardizedFileURL.resolvingSymlinksInPath().path
+        let resolved = directory.standardizedFileURL.resolvingSymlinksInPath().path
+        guard resolved.hasPrefix(base.hasSuffix("/") ? base : base + "/") else {
+            throw OutputDirectoryError.outsideOutputFolder(directory)
+        }
         return directory
     }
 
@@ -48,39 +55,75 @@ public struct OutputDirectory: Sendable {
             .appending(path: Self.folderName(for: tool), directoryHint: .isDirectory)
     }
 
-    /// A file URL in `directory` named `preferredName` that does not exist yet,
-    /// adding ` 2`, ` 3`, … before the extension on collisions.
+    /// The name a new file would get right now, adding ` 2`, ` 3`, … before the extension on
+    /// collisions. For display only: another writer can take the name first, so write files
+    /// with ``writeNewFile(in:preferredName:write:)``.
     public static func uniqueFileURL(in directory: URL, preferredName: String) -> URL {
         let name = sanitizedFileName(preferredName)
-        let base = (name as NSString).deletingPathExtension
-        let ext = (name as NSString).pathExtension
+        var counter = 1
         var candidate = directory.appending(path: name, directoryHint: .notDirectory)
-        var counter = 2
         while FileManager.default.fileExists(atPath: candidate.path) {
-            let numbered = ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)"
-            candidate = directory.appending(path: numbered, directoryHint: .notDirectory)
             counter += 1
+            candidate = directory.appending(path: numberedName(name, counter), directoryHint: .notDirectory)
         }
         return candidate
     }
 
-    /// Resolves the output URL for a processed copy of `source`, guaranteeing it is not `source`.
-    public func outputURL(
+    /// Writes a new file into `directory` without ever replacing an existing one, and returns its URL.
+    ///
+    /// `write` receives a private temporary URL inside `directory`. The finished file is then
+    /// published as `preferredName`, or ` 2`, ` 3`, … on collision, with an exclusive rename,
+    /// so concurrent exports with the same name all survive.
+    public static func writeNewFile(
+        in directory: URL, preferredName: String, write: (URL) throws -> Void
+    ) throws -> URL {
+        let name = sanitizedFileName(preferredName)
+        let temporary = directory.appending(
+            path: ".opentoolbox-\(UUID().uuidString).partial", directoryHint: .notDirectory)
+        do {
+            try write(temporary)
+        } catch {
+            try? FileManager.default.removeItem(at: temporary)
+            throw error
+        }
+        for counter in 1...maximumNumberedNames {
+            let candidate = directory.appending(
+                path: counter == 1 ? name : numberedName(name, counter), directoryHint: .notDirectory)
+            if renamex_np(temporary.path, candidate.path, UInt32(RENAME_EXCL)) == 0 { return candidate }
+            let code = errno
+            guard code == EEXIST else {
+                try? FileManager.default.removeItem(at: temporary)
+                throw NSError(
+                    domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [NSFilePathErrorKey: candidate.path])
+            }
+        }
+        try? FileManager.default.removeItem(at: temporary)
+        throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: directory.appending(path: name).path])
+    }
+
+    /// Writes a processed copy of `source` into the tool's dated folder and returns its URL.
+    /// The result never replaces `source` or any other existing file.
+    public func writeOutput(
         forSource source: URL,
         tool: ToolID,
         newExtension: String? = nil,
-        date: Date = Date()
+        date: Date = Date(),
+        write: (URL) throws -> Void
     ) throws -> URL {
         var name = source.lastPathComponent
         if let newExtension {
             name = (name as NSString).deletingPathExtension + "." + newExtension
         }
-        let url = Self.uniqueFileURL(in: try runDirectory(for: tool, date: date), preferredName: name)
-        guard url.standardizedFileURL.resolvingSymlinksInPath() != source.standardizedFileURL.resolvingSymlinksInPath()
-        else {
-            throw OutputDirectoryError.wouldOverwriteSource(source)
-        }
-        return url
+        return try Self.writeNewFile(in: try runDirectory(for: tool, date: date), preferredName: name, write: write)
+    }
+
+    static let maximumNumberedNames = 10_000
+
+    /// `photo.png`, 3 → `photo 3.png`
+    static func numberedName(_ name: String, _ counter: Int) -> String {
+        let base = (name as NSString).deletingPathExtension
+        let ext = (name as NSString).pathExtension
+        return ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)"
     }
 
     /// `dev.json-formatter` → `json-formatter`

@@ -9,6 +9,7 @@ public enum PDFToolError: Error, Equatable, LocalizedError {
     case invalidRange(String)
     case writeFailed
     case empty
+    case pageTooLarge
 
     public var errorDescription: String? {
         switch self {
@@ -17,6 +18,7 @@ public enum PDFToolError: Error, Equatable, LocalizedError {
         case .invalidRange(let text): coreLocalized("“\(text)” is not a valid page range. Use forms like 1-3, 5, 8-.")
         case .writeFailed: coreLocalized("The PDF could not be saved.")
         case .empty: coreLocalized("There are no pages to save.")
+        case .pageTooLarge: coreLocalized("This page is too large to render at the chosen resolution.")
         }
     }
 }
@@ -144,13 +146,24 @@ public enum PDFTools {
         return document
     }
 
+    /// Largest rendered page: 20,000 px per side and 200 megapixels.
+    static let maximumRenderSide: CGFloat = 20_000
+    static let maximumRenderPixels: CGFloat = 200_000_000
+
     /// Renders a page at `dpi` (72 = 1 point per pixel), honoring page rotation.
     public static func render(_ page: PDFPage, dpi: CGFloat = 144) throws -> CGImage {
         let bounds = page.bounds(for: .mediaBox)
         let quarterTurn = page.rotation % 180 != 0
         let scale = dpi / 72
-        let width = max(1, Int(((quarterTurn ? bounds.height : bounds.width) * scale).rounded()))
-        let height = max(1, Int(((quarterTurn ? bounds.width : bounds.height) * scale).rounded()))
+        let pixelWidth = ((quarterTurn ? bounds.height : bounds.width) * scale).rounded()
+        let pixelHeight = ((quarterTurn ? bounds.width : bounds.height) * scale).rounded()
+        // A damaged or hostile page box must not trap the Int conversion or exhaust memory.
+        guard pixelWidth.isFinite, pixelHeight.isFinite,
+            pixelWidth <= maximumRenderSide, pixelHeight <= maximumRenderSide,
+            pixelWidth * pixelHeight <= maximumRenderPixels
+        else { throw PDFToolError.pageTooLarge }
+        let width = max(1, Int(pixelWidth))
+        let height = max(1, Int(pixelHeight))
         guard
             let context = CGContext(
                 data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
@@ -168,6 +181,21 @@ public enum PDFTools {
     public static func write(_ document: PDFDocument, to url: URL) throws {
         guard document.pageCount > 0 else { throw PDFToolError.empty }
         guard document.write(to: url) else { throw PDFToolError.writeFailed }
+    }
+
+    /// Text of every page in order. Pages with embedded text use it; image-only pages
+    /// (scans) are rendered and recognized with Vision, so mixed documents lose nothing.
+    public static func recognizeText(in document: PDFDocument, accurate: Bool = true, dpi: CGFloat = 200) throws
+        -> String
+    {
+        try (0..<document.pageCount).compactMap { document.page(at: $0) }.map { page in
+            let embedded = (page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !embedded.isEmpty { return embedded }
+            return try TextRecognizer.recognize(in: try render(page, dpi: dpi), accurate: accurate)
+                .map(\.text).joined(separator: "\n")
+        }
+        .filter { !$0.isEmpty }
+        .joined(separator: "\n\n")
     }
 
     /// Text already embedded in the PDF (no OCR).

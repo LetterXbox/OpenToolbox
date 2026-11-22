@@ -57,12 +57,32 @@ public enum RegexTester {
         }
     }
 
+    public struct SearchResult: Equatable, Sendable {
+        public var matches: [Match]
+        /// `false` when the search stopped early: cancelled, out of time, or at ``maximumMatches``.
+        public var isComplete: Bool
+    }
+
     public static func matches(_ pattern: String, in text: String, options: Options = []) throws -> [Match] {
+        try search(pattern, in: text, options: options, shouldStop: { false }).matches
+    }
+
+    /// Finds matches, polling `shouldStop` while ICU works (including inside one slow,
+    /// backtracking match attempt) so a runaway pattern can be abandoned.
+    public static func search(
+        _ pattern: String, in text: String, options: Options = [], shouldStop: () -> Bool
+    ) throws -> SearchResult {
         let regex = try compile(pattern, options: options)
         let names = groupNames(in: pattern)
         let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
         var matches: [Match] = []
-        regex.enumerateMatches(in: text, range: nsRange) { result, _, stop in
+        var isComplete = true
+        regex.enumerateMatches(in: text, options: .reportProgress, range: nsRange) { result, _, stop in
+            if shouldStop() {
+                isComplete = false
+                stop.pointee = true
+                return
+            }
             guard let result, let range = Range(result.range, in: text) else { return }
             var groups: [Group] = []
             if result.numberOfRanges > 1 {
@@ -77,15 +97,26 @@ public enum RegexTester {
                 }
             }
             matches.append(Match(index: matches.count, value: String(text[range]), range: range, groups: groups))
-            if matches.count >= maximumMatches { stop.pointee = true }
+            if matches.count >= maximumMatches {
+                isComplete = false
+                stop.pointee = true
+            }
         }
-        return matches
+        return SearchResult(matches: matches, isComplete: isComplete)
     }
 
     /// Replaces matches using a template (`$1`, `${name}`, `\$` for a literal dollar sign).
     public static func replace(_ pattern: String, in text: String, with template: String, options: Options = []) throws
         -> String
     {
+        // Never stops early, so the result is always present.
+        try replace(pattern, in: text, with: template, options: options, shouldStop: { false }) ?? text
+    }
+
+    /// Like ``replace(_:in:with:options:)``, but returns `nil` once `shouldStop` returns `true`.
+    public static func replace(
+        _ pattern: String, in text: String, with template: String, options: Options = [], shouldStop: () -> Bool
+    ) throws -> String? {
         let regex = try compile(pattern, options: options)
         let names = groupNames(in: pattern)
         // NSRegularExpression templates do not understand ${name}; map names to numbers first.
@@ -93,8 +124,25 @@ public enum RegexTester {
         for (index, name) in names {
             resolved = resolved.replacingOccurrences(of: "${\(name)}", with: "$\(index)")
         }
-        return regex.stringByReplacingMatches(
-            in: text, range: NSRange(text.startIndex..<text.endIndex, in: text), withTemplate: resolved)
+        let source = text as NSString
+        var output = ""
+        var cursor = 0
+        var stopped = false
+        regex.enumerateMatches(in: text, options: .reportProgress, range: NSRange(location: 0, length: source.length)) {
+            result, _, stop in
+            if shouldStop() {
+                stopped = true
+                stop.pointee = true
+                return
+            }
+            guard let result else { return }
+            output += source.substring(with: NSRange(location: cursor, length: result.range.location - cursor))
+            output += regex.replacementString(for: result, in: text, offset: 0, template: resolved)
+            cursor = NSMaxRange(result.range)
+        }
+        if stopped { return nil }
+        output += source.substring(from: cursor)
+        return output
     }
 
     /// Maps capture-group numbers to names for `(?<name>…)` groups.

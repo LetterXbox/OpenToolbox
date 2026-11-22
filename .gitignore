@@ -23,5 +23,6 @@ outputs/
 .env
 .env.*
 
-# Local agent worktrees
-.claude/worktrees/
+# Local agent instructions and tool state
+AGENTS.md
+.claude/

@@ -139,7 +139,7 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
     var failure: String?
     var saved: URL?
 
-    private static var active: Set<ScreenRecorder> = []
+    fileprivate static var active: Set<ScreenRecorder> = []
     @ObservationIgnored private var closeRequested = false
 
     @ObservationIgnored private var stream: SCStream?
@@ -244,9 +244,19 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
     }
 
     private func fail(_ error: Error) {
-        if let temporary { try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent()) }
+        defer { reset() }
         failure = error.localizedDescription
-        reset()
+        guard let temporary else { return }
+        let size = (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard size > 0, let destination else {
+            try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent())
+            return
+        }
+        let result = saveRecording(
+            temporary, named: recordingName("Screen Recording", extension: "mov"), output: destination.output,
+            tool: destination.tool)
+        saved = result.saved
+        failure = result.failure ?? L("Recording stopped early: \(error.localizedDescription) What was recorded was saved.")
     }
 
     private func reset() {
@@ -283,8 +293,31 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
     }
 
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
-        Task { @MainActor in
-            if self.phase != .idle { self.fail(error) }
+        Task { @MainActor in self.streamStopped(error) }
+    }
+
+    private func streamStopped(_ error: Error) {
+        switch phase {
+        case .recording, .finishing:
+            phase = .finishing
+            let stopped = (error as NSError).code == SCStreamError.Code.userStopped.rawValue
+            if !stopped { failure = error.localizedDescription }
+            Task {
+                try? await Task.sleep(for: .seconds(5))
+                if self.phase == .finishing { self.fail(error) }
+            }
+        case .starting:
+            fail(error)
+        case .idle, .picking:
+            break
+        }
+    }
+
+    static func stopAll() async {
+        for recorder in active { recorder.close() }
+        let deadline = Date().addingTimeInterval(10)
+        while !active.isEmpty, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(100))
         }
     }
 
@@ -294,6 +327,15 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
 
     nonisolated func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: Error) {
         Task { @MainActor in self.fail(error) }
+    }
+}
+
+enum RecordingSessions {
+    @MainActor static var isRecording: Bool { !ScreenRecorder.active.isEmpty || !AudioRecorder.active.isEmpty }
+
+    @MainActor static func stopAll() async {
+        AudioRecorder.stopAll()
+        await ScreenRecorder.stopAll()
     }
 }
 
@@ -361,7 +403,9 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     var level: Float = 0
     var failure: String?
     var saved: URL?
-    @ObservationIgnored private var isClosed = false
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var destination: (output: OutputDirectory, tool: ToolID)?
+    fileprivate static var active: Set<AudioRecorder> = []
 
     @ObservationIgnored private var recorder: AVAudioRecorder?
     @ObservationIgnored private var temporary: URL?
@@ -371,14 +415,19 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
 
     var inputName: String? { AVCaptureDevice.default(for: .audio)?.localizedName }
 
-    func start() async {
-        guard !isRequestingAccess, !isRecording, !isClosed else { return }
+    func requestStart(output: OutputDirectory, tool: ToolID) {
+        let generation = self.generation
+        Task { await start(generation, output: output, tool: tool) }
+    }
+
+    private func start(_ requested: Int, output: OutputDirectory, tool: ToolID) async {
+        guard requested == generation, !isRequestingAccess, !isRecording else { return }
         failure = nil
         saved = nil
         isRequestingAccess = true
         let granted = await AVAudioApplication.requestRecordPermission()
         isRequestingAccess = false
-        guard !isClosed else { return }
+        guard requested == generation else { return }
         guard granted else {
             failure = L("Allow OpenToolbox in System Settings → Privacy & Security → Microphone to record.")
             return
@@ -399,6 +448,8 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
             }
             self.recorder = recorder
             temporary = url
+            destination = (output, tool)
+            Self.active.insert(self)
             since = Date()
             meterTask = Task { [weak self] in
                 while !Task.isCancelled {
@@ -418,13 +469,16 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         level = max(0, min(1, (power + 60) / 60))
     }
 
-    func reopen() {
-        isClosed = false
+    func close(output: OutputDirectory, tool: ToolID) {
+        generation += 1
+        if isRecording { stop(output: output, tool: tool) }
     }
 
-    func close(output: OutputDirectory, tool: ToolID) {
-        isClosed = true
-        if isRecording { stop(output: output, tool: tool) }
+    static func stopAll() {
+        for recorder in active {
+            guard let destination = recorder.destination else { continue }
+            recorder.stop(output: destination.output, tool: destination.tool)
+        }
     }
 
     func stop(output: OutputDirectory, tool: ToolID) {
@@ -434,6 +488,7 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         meterTask = nil
         self.recorder = nil
         self.temporary = nil
+        Self.active.remove(self)
         since = nil
         level = 0
         let result = saveRecording(
@@ -442,20 +497,11 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         if let message = result.failure { failure = message }
     }
 
-    func discard() {
-        recorder?.stop()
-        meterTask?.cancel()
-        if let temporary { try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent()) }
-        recorder = nil
-        temporary = nil
-        since = nil
-        level = 0
-    }
-
     nonisolated func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
         let message = error?.localizedDescription
         Task { @MainActor in
-            self.discard()
+            guard let destination = self.destination else { return }
+            self.stop(output: destination.output, tool: destination.tool)
             self.failure = message ?? L("Recording stopped because of an error.")
         }
     }
@@ -487,7 +533,7 @@ struct RecordAudioView: View {
                         .frame(width: 160)
                 } else {
                     Button(L("Record"), systemImage: "record.circle") {
-                        Task { await recorder.start() }
+                        recorder.requestStart(output: model.outputDirectory, tool: tool.id)
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(recorder.isRequestingAccess)
@@ -503,7 +549,6 @@ struct RecordAudioView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
-        .onAppear { recorder.reopen() }
         .onDisappear { recorder.close(output: model.outputDirectory, tool: tool.id) }
         .reportsActivity(recorder.isRecording)
     }

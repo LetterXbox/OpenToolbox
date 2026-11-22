@@ -90,6 +90,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.start()
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard RecordingSessions.isRecording else { return .terminateNow }
+        Task {
+            await RecordingSessions.stopAll()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         updates.installOnQuit()
     }

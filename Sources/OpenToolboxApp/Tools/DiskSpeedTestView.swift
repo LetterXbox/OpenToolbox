@@ -131,13 +131,19 @@ struct DiskSpeedTestView: View {
             }
         }
         .onAppear { if volumes.isEmpty { refresh() } }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in
+            if !session.isRunning { refresh() }
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didUnmountNotification)) { _ in
+            if !session.isRunning { refresh() }
+        }
         .onDisappear { session.cancel() }
         .reportsActivity(session.isRunning)
     }
 
     private func refresh() {
         volumes = SpeedTestVolume.mounted()
-        if let volume, let match = volumes.first(where: { $0.id == volume.id }) {
+        if let volume, let match = volumes.first(where: { $0.id == volume.id && $0.identity == volume.identity }) {
             self.volume = match
         } else {
             volume = volumes.first

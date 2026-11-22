@@ -36,6 +36,12 @@ struct FileSnapshot: Equatable, Sendable {
         changeSeconds = info.st_ctimespec.tv_sec
         changeNanoseconds = info.st_ctimespec.tv_nsec
     }
+
+    /// A rename can change ctime without changing the file or its contents.
+    func matchesAfterRename(_ other: Self) -> Bool {
+        identity == other.identity && size == other.size
+            && modificationSeconds == other.modificationSeconds && modificationNanoseconds == other.modificationNanoseconds
+    }
 }
 
 enum FileToolDisk {
@@ -121,8 +127,26 @@ enum FileToolDisk {
         return fd
     }
 
+    static func hasResourceFork(_ fd: Int32, at url: URL) throws -> Bool {
+        if fgetxattr(fd, "com.apple.ResourceFork", nil, 0, 0, 0) >= 0 { return true }
+        if errno == ENOATTR { return false }
+        throw posixError(at: url)
+    }
+
     static func move(_ source: String, to target: String, in directory: Int32, at url: URL) throws {
         guard renameatx_np(directory, source, directory, target, UInt32(RENAME_EXCL)) == 0 else {
+            throw posixError(at: url)
+        }
+    }
+
+    static func move(_ name: String, from source: Int32, to target: Int32, at url: URL) throws {
+        guard renameatx_np(source, name, target, name, UInt32(RENAME_EXCL)) == 0 else {
+            throw posixError(at: url)
+        }
+    }
+
+    static func exchange(_ source: String, with target: String, in directory: Int32, at url: URL) throws {
+        guard renameatx_np(directory, source, directory, target, UInt32(RENAME_SWAP)) == 0 else {
             throw posixError(at: url)
         }
     }

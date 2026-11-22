@@ -125,6 +125,7 @@ struct QuarantineHelperView: View {
     private struct FileRow: Identifiable, Sendable {
         let url: URL
         let status: QuarantineStatus?
+        let inspection: QuarantineInspection?
         let error: String?
 
         var id: URL { url }
@@ -176,7 +177,7 @@ struct QuarantineHelperView: View {
                     Button(L("Clear")) { files = [] }
                         .disabled(isWorking)
                     Button(L("Remove Quarantine from All")) {
-                        inspect(files.filter(\.isQuarantined).map(\.url), removing: true)
+                        removeQuarantine(from: files.filter(\.isQuarantined))
                     }
                     .disabled(isWorking || !files.contains(where: { $0.isQuarantined }))
                 }) {
@@ -206,10 +207,13 @@ struct QuarantineHelperView: View {
                 Spacer()
                 if row.isQuarantined {
                     Badge(text: L("Quarantined"), tint: .orange)
-                    Button(L("Remove Quarantine")) { inspect([row.url], removing: true) }
+                    Button(L("Remove Quarantine")) { removeQuarantine(from: [row]) }
                         .disabled(isWorking)
                 } else if row.status == .absent {
                     Badge(text: L("No quarantine attribute"), tint: .green)
+                } else if row.error != nil {
+                    Button(L("Inspect Again")) { inspect([row.url]) }
+                        .disabled(isWorking)
                 }
             }
             Text(row.url.path)
@@ -242,16 +246,31 @@ struct QuarantineHelperView: View {
         }
     }
 
-    private func inspect(_ urls: [URL], removing: Bool = false) {
-        guard !isWorking, !urls.isEmpty else { return }
+    private func inspect(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        updateFiles {
+            var seen: Set<URL> = []
+            return urls.filter { seen.insert($0).inserted }.map { Self.inspectFile($0) }
+        }
+    }
+
+    private func removeQuarantine(from rows: [FileRow]) {
+        guard !rows.isEmpty else { return }
+        updateFiles {
+            rows.compactMap { row in
+                guard let inspection = row.inspection else { return nil }
+                return Self.inspectFile(row.url, removing: inspection)
+            }
+        }
+    }
+
+    private func updateFiles(_ work: @escaping @Sendable () -> [FileRow]) {
+        guard !isWorking else { return }
         isWorking = true
         importError = nil
         Task {
             defer { isWorking = false }
-            let rows = await Task.detached(priority: .userInitiated) {
-                var seen: Set<URL> = []
-                return urls.filter { seen.insert($0).inserted }.map { Self.inspectFile($0, removing: removing) }
-            }.value
+            let rows = await Task.detached(priority: .userInitiated) { work() }.value
             for row in rows {
                 if let index = files.firstIndex(where: { $0.id == row.id }) {
                     files[index] = row
@@ -262,19 +281,18 @@ struct QuarantineHelperView: View {
         }
     }
 
-    private nonisolated static func inspectFile(_ url: URL, removing: Bool) -> FileRow {
+    private nonisolated static func inspectFile(_ url: URL, removing: QuarantineInspection? = nil) -> FileRow {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-        var status: QuarantineStatus?
         do {
-            status = try QuarantineAttribute.read(at: url)
-            if removing, case .present? = status {
-                try QuarantineAttribute.remove(at: url)
-                status = .absent
+            if let removing {
+                try QuarantineAttribute.remove(at: url, matching: removing)
+                return FileRow(url: url, status: .absent, inspection: nil, error: nil)
             }
-            return FileRow(url: url, status: status, error: nil)
+            let inspection = try QuarantineAttribute.inspect(at: url)
+            return FileRow(url: url, status: inspection.status, inspection: inspection, error: nil)
         } catch {
-            return FileRow(url: url, status: status, error: error.localizedDescription)
+            return FileRow(url: url, status: nil, inspection: nil, error: error.localizedDescription)
         }
     }
 }

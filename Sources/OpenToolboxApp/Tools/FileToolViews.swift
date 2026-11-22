@@ -499,7 +499,7 @@ struct FindDuplicatesView: View {
             Button(L("Move \(selected.count) Files to Trash"), role: .destructive) { moveToTrash() }
             Button(L("Cancel"), role: .cancel) {}
         } message: {
-            Text(L("At least one unchanged file will be kept in each duplicate group."))
+            Text(L("Before each move, OpenToolbox checks that an unselected copy is unchanged."))
         }
         .onChange(of: folders) { clearScan() }
         .onChange(of: includeHidden) { clearScan() }
@@ -683,38 +683,18 @@ struct FindDuplicatesView: View {
         errorMessage = nil
         status = nil
         let requested = selected
+        let groups = self.groups
+        let folders = self.folders
         Task {
-            let scopes = beginFileToolAccess(folders)
-            defer {
-                endFileToolAccess(scopes)
-                session.isRecycling = false
-            }
-
-            var eligible: [URL] = []
-            for group in groups {
-                let candidates = group.files.filter { requested.contains($0.url) }
-                guard !candidates.isEmpty,
-                      group.files.contains(where: { !requested.contains($0.url) && $0.isUnchanged() }) else { continue }
-                eligible += candidates.filter { $0.isUnchanged() }.map(\.url)
-            }
-            guard !eligible.isEmpty else {
-                errorMessage = L("The selected files or their remaining copies changed. Scan again before moving them to Trash.")
-                return
-            }
-
-            let (moved, error): (Set<URL>, String?) = await withCheckedContinuation { continuation in
-                NSWorkspace.shared.recycle(eligible, completionHandler: { locations, error in
-                    continuation.resume(returning: (Set(locations.keys), error?.localizedDescription))
-                })
-            }
-            groups = groups.compactMap { $0.removingFiles(at: moved) }
-            selected.subtract(moved)
-            status = L("Moved \(moved.count) files to Trash.")
-            let remaining = requested.subtracting(moved).count
-            if let error {
-                errorMessage = error
-            } else if remaining > 0 {
-                errorMessage = L("\(remaining) selected files could not be moved. Scan again to refresh the results.")
+            defer { session.isRecycling = false }
+            let result = await Task.detached(priority: .userInitiated) {
+                withFileToolAccess(folders) { DuplicateScanner.trashSelected(requested, in: groups) }
+            }.value
+            self.groups = groups.compactMap { $0.removingFiles(at: result.moved) }
+            selected.subtract(result.moved)
+            status = L("Moved \(result.moved.count) files to Trash.")
+            if !result.issues.isEmpty {
+                errorMessage = result.issues.map { L("\($0.file.path): \($0.message)") }.joined(separator: "\n")
             }
         }
     }

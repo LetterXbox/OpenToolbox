@@ -165,6 +165,10 @@ public struct RecordingStore: Sendable {
         let source = openat(folder, entry.name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
         guard source >= 0 else { throw StoreError.notARecording(entry.name) }
         let handle = FileHandle(fileDescriptor: source, closeOnDealloc: true)
+        var opened = stat()
+        guard fstat(source, &opened) == 0, (opened.st_mode & S_IFMT) == S_IFREG,
+            UInt64(opened.st_dev) == entry.device, UInt64(opened.st_ino) == entry.inode
+        else { throw StoreError.notARecording(entry.name) }
         let saved = try output.writeNewFile(for: entry.tool, preferredName: entry.name) { destination in
             FileManager.default.createFile(atPath: destination.path, contents: nil)
             let writer = try FileHandle(forWritingTo: destination)

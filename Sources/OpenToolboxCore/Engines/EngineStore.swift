@@ -191,8 +191,10 @@ public final class EngineStore: Sendable {
             throw EngineStoreError.unavailable(id)
         }
         let executablePath = artifact.payload.executableRelativePath
-        guard Self.isSafeRelativePath(executablePath) else { throw EngineStoreError.unsafeArchivePath(executablePath) }
-        if case .executable = artifact.payload, executablePath.contains("/") {
+        guard let components = Self.relativePathComponents(executablePath.utf8) else {
+            throw EngineStoreError.unsafeArchivePath(executablePath)
+        }
+        if case .executable = artifact.payload, components.count != 1 {
             throw EngineStoreError.unsafeArchivePath(executablePath)
         }
 
@@ -367,7 +369,7 @@ public final class EngineStore: Sendable {
                   receipt.sha256.utf8.count == 64,
                   receipt.sha256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
                   receipt.sourceURL.scheme?.lowercased() == "https",
-                  Self.isSafeRelativePath(receipt.executableRelativePath) else { throw POSIXError(.EINVAL) }
+                  Self.relativePathComponents(receipt.executableRelativePath.utf8) != nil else { throw POSIXError(.EINVAL) }
             return Installation(directory: directory, receipt: receipt)
         } catch {
             throw EngineStoreError.unrecognizedInstallation(id)
@@ -375,8 +377,7 @@ public final class EngineStore: Sendable {
     }
 
     private static func executable(_ path: String, in engine: EngineDirectory, ready: Bool) throws -> FileHandle {
-        guard Self.isSafeRelativePath(path) else { throw EngineStoreError.unsafeArchivePath(path) }
-        let parts = path.split(separator: "/").map(String.init)
+        guard let parts = Self.relativePathComponents(path.utf8) else { throw EngineStoreError.unsafeArchivePath(path) }
         let files = try engine.directory("files")
         try files.requireOwner()
         guard try files.metadata().st_dev == engine.metadata().st_dev else { throw POSIXError(.EXDEV) }
@@ -429,12 +430,18 @@ public final class EngineStore: Sendable {
         guard try current.isSameDirectory(as: root.metadata()) else { throw POSIXError(.EBUSY) }
     }
 
-    static func isSafeRelativePath(_ path: String) -> Bool {
-        guard !path.hasPrefix("~"), path.utf8.count <= 1023,
-              !path.utf8.contains(where: { $0 == 0 || $0 == 92 }) else { return false }
-        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
-        return !parts.isEmpty && parts.count <= 32 &&
-            parts.allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." && $0.utf8.count <= 255 }
+    static func relativePathComponents(_ path: some Collection<UInt8>) -> [String]? {
+        guard path.first != 0x7e, path.count <= 1023, !path.contains(0x5c) else { return nil }
+        // The filesystem splits on slash bytes even when a slash is part of a grapheme cluster.
+        let parts = path.split(separator: 0x2f, omittingEmptySubsequences: false)
+        guard !parts.isEmpty, parts.count <= 32 else { return nil }
+        var components: [String] = []
+        for part in parts {
+            guard part.count <= 255, let name = String(validating: part, as: UTF8.self),
+                  EngineDirectory.isSingleComponent(name) else { return nil }
+            components.append(name)
+        }
+        return components
     }
 
     private static func allocatedSize(of directory: EngineDirectory, device: dev_t, depth: Int) throws -> Int64 {

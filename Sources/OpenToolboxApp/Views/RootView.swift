@@ -79,7 +79,8 @@ private extension View {
         // safeAreaBar first ships in the macOS 26 SDK (Swift 6.2); Xcode 16 must still build this file.
         #if compiler(>=6.2)
         if #available(macOS 26, *) {
-            safeAreaBar(edge: .bottom, content: content)
+            scrollEdgeEffectStyle(.hard, for: .bottom)
+                .safeAreaBar(edge: .bottom, content: content)
         } else {
             safeAreaInset(edge: .bottom, content: content)
         }

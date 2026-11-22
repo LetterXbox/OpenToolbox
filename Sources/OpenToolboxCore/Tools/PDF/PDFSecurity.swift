@@ -61,8 +61,9 @@ public enum PDFSecurity {
         throws -> URL
     {
         guard !protection.openPassword.isEmpty else { throw PDFPasswordError.emptyPassword }
-        let document = try PDFTools.open(source)
-        guard !document.isEncrypted else { throw PDFPasswordError.alreadyProtected(source.lastPathComponent) }
+        let name = source.lastPathComponent
+        guard let document = PDFDocument(url: source) else { throw PDFToolError.unreadable(name) }
+        guard !document.isEncrypted else { throw PDFPasswordError.alreadyProtected(name) }
         let owner = protection.ownerPassword.isEmpty ? protection.openPassword : protection.ownerPassword
         let options: [PDFDocumentWriteOption: Any] = [
             .userPasswordOption: protection.openPassword,
@@ -76,8 +77,8 @@ public enum PDFSecurity {
         }
     }
 
-    /// Writes an unprotected copy. Unless the PDF's owner password is given, only PDFs whose
-    /// password unlocks every permission can be unprotected.
+    /// Writes an unprotected copy. This needs the PDF's owner password; for a PDF with a single
+    /// password, that is its only password.
     public static func removePassword(_ source: URL, password: String, output: OutputDirectory, tool: ToolID) throws
         -> URL
     {
@@ -98,7 +99,6 @@ public enum PDFSecurity {
         }
     }
 
-    /// Rebuilds an outline so its entries point at the matching pages of `copy`.
     static func copyOutline(_ item: PDFOutline, from source: PDFDocument, to copy: PDFDocument) -> PDFOutline {
         let result = PDFOutline()
         result.label = item.label
@@ -106,7 +106,9 @@ public enum PDFSecurity {
         if let destination = item.destination, let page = destination.page {
             let index = source.index(for: page)
             if index >= 0, index < copy.pageCount, let target = copy.page(at: index) {
-                result.destination = PDFDestination(page: target, at: destination.point)
+                let copied = PDFDestination(page: target, at: destination.point)
+                copied.zoom = destination.zoom
+                result.destination = copied
             }
         } else if let action = item.action {
             result.action = action

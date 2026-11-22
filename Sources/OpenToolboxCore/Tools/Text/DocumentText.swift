@@ -28,9 +28,7 @@ public enum DocumentText {
         let name = url.lastPathComponent
         let type = UTType(filenameExtension: url.pathExtension)
         let text: String
-        if type?.conforms(to: .html) == true || type?.conforms(to: .webArchive) == true {
-            throw DocumentTextError.unreadable(name)
-        } else if type?.conforms(to: .pdf) == true {
+        if type?.conforms(to: .pdf) == true {
             guard let document = PDFDocument(url: url) else { throw DocumentTextError.unreadable(name) }
             if document.isLocked { throw PDFToolError.locked(name) }
             text = PDFTools.text(of: document)
@@ -38,14 +36,27 @@ public enum DocumentText {
             guard let data = try? Data(contentsOf: url) else { throw DocumentTextError.unreadable(name) }
             text = String(decoding: data, as: UTF8.self)
         } else {
-            guard let attributed = try? NSAttributedString(url: url, options: [:], documentAttributes: nil) else {
-                throw DocumentTextError.unreadable(name)
-            }
+            guard let documentType = richTextType(for: type),
+                let attributed = try? NSAttributedString(
+                    url: url, options: [.documentType: documentType], documentAttributes: nil)
+            else { throw DocumentTextError.unreadable(name) }
             text = attributed.string
         }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw DocumentTextError.empty(name) }
         return trimmed
+    }
+
+    /// The importer for each rich text format, named explicitly so a file is never sniffed as
+    /// HTML, which AppKit would load images and styles for.
+    static func richTextType(for type: UTType?) -> NSAttributedString.DocumentType? {
+        guard let type else { return nil }
+        let formats: [(String, NSAttributedString.DocumentType)] = [
+            ("public.rtf", .rtf), ("com.apple.rtfd", .rtfd), ("com.apple.flat-rtfd", .rtfd),
+            ("org.openxmlformats.wordprocessingml.document", .officeOpenXML), ("com.microsoft.word.doc", .docFormat),
+            ("org.oasis-open.opendocument.text", .openDocument),
+        ]
+        return formats.first { UTType($0.0).map(type.conforms(to:)) ?? false }?.1
     }
 
     /// Splits text into pieces of at most `limit` characters, breaking between paragraphs,

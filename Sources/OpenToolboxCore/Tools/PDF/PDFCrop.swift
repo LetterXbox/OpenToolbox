@@ -35,10 +35,8 @@ public struct PDFMargins: Equatable, Sendable {
 }
 
 public enum PDFCrop {
-    /// Smallest side a cropped page may have, in points.
     static let minimumSide: CGFloat = 1
 
-    /// The crop box for margins seen on a page shown with `rotation` degrees clockwise.
     static func cropRect(_ box: CGRect, margins: PDFMargins, rotation: Int) -> CGRect? {
         let (top, left, bottom, right): (Double, Double, Double, Double) =
             switch ((rotation % 360) + 360) % 360 {

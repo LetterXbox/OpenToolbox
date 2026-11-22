@@ -136,7 +136,6 @@ public enum Transcriber {
         return try await LegacyTranscriber.transcribe(audio.url, locale: locale)
     }
 
-    /// Video files are reduced to their audio track first.
     static func audioFile(for url: URL) async throws -> (url: URL, isTemporary: Bool) {
         let asset = AVURLAsset(url: url)
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
@@ -181,7 +180,6 @@ enum LegacyTranscriber {
     }
 }
 
-/// Holds the recognition task so cancellation can reach it from another thread.
 final class RecognitionBox: @unchecked Sendable {
     private let lock = NSLock()
     private var task: SFSpeechRecognitionTask?

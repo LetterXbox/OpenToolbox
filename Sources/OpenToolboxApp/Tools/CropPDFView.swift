@@ -94,7 +94,6 @@ struct CropPDFView: View {
     }
 }
 
-/// The first page with the area that will be kept outlined.
 private struct CropPreview: View {
     let url: URL
     let margins: PDFMargins

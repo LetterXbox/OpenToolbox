@@ -4,7 +4,6 @@ import SwiftUI
 @preconcurrency import Translation
 import UniformTypeIdentifiers
 
-/// A text area with a heading and an optional trailing control.
 private struct TextPane<Accessory: View>: View {
     let title: String
     @Binding var text: String
@@ -129,7 +128,6 @@ struct TranslateView: View {
         isTranslating = false
     }
 
-    /// Translates paragraph by paragraph so blank lines between them are kept.
     @concurrent
     nonisolated private static func translate(_ input: String, with session: TranslationSession) async throws
         -> (String, Locale.Language?)
@@ -280,6 +278,7 @@ struct TranscribeView: View {
     let tool: ToolDescriptor
     @State private var files: [URL] = []
     @State private var locales: [Locale] = []
+    @State private var hasLoadedLocales = false
     @State private var localeID = Locale.current.identifier
     @State private var format: TranscriptFormat = .text
     @State private var isWorking = false
@@ -315,11 +314,15 @@ struct TranscribeView: View {
                 } else {
                     Button(L("Transcribe \(files.count) Files"), action: run)
                         .buttonStyle(.borderedProminent)
-                        .disabled(files.isEmpty)
+                        .disabled(files.isEmpty || !locales.contains { $0.identifier == localeID })
                 }
                 Spacer()
                 Text(L("Audio stays on this Mac"))
                     .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            if hasLoadedLocales, locales.isEmpty {
+                Text(L("No languages can be transcribed on this Mac."))
                     .foregroundStyle(.secondary)
             }
             FileResultsView(results: results)
@@ -332,6 +335,7 @@ struct TranscribeView: View {
         .task {
             guard locales.isEmpty else { return }
             locales = await Transcriber.supportedLocales()
+            hasLoadedLocales = true
             if !locales.contains(where: { $0.identifier == localeID }) {
                 let language = Locale.current.language.languageCode?.identifier
                 localeID =

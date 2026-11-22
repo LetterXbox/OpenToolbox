@@ -201,7 +201,9 @@ struct PDFPasswordTests {
             for (index, label) in ["Intro", "Results"].enumerated() {
                 let entry = PDFOutline()
                 entry.label = label
-                entry.destination = PDFDestination(page: try #require(document.page(at: index * 2)), at: .zero)
+                let destination = PDFDestination(page: try #require(document.page(at: index * 2)), at: CGPoint(x: 10, y: 50))
+                destination.zoom = 2
+                entry.destination = destination
                 root.insertChild(entry, at: root.numberOfChildren)
             }
             document.outlineRoot = root
@@ -213,8 +215,10 @@ struct PDFPasswordTests {
             let outline = try #require(reopened.outlineRoot)
             #expect(outline.numberOfChildren == 2)
             #expect(outline.child(at: 1)?.label == "Results")
-            let page = try #require(outline.child(at: 1)?.destination?.page)
+            let destination = try #require(outline.child(at: 1)?.destination)
+            let page = try #require(destination.page)
             #expect(reopened.index(for: page) == 2)
+            #expect(destination.zoom == 2)
         }
     }
 

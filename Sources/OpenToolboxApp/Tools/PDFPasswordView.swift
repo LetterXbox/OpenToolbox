@@ -55,7 +55,7 @@ struct PDFPasswordView: View {
                         .foregroundStyle(.secondary)
                     }
                 } else {
-                    Text(L("Enter the password to open the PDF, or its owner password if it only restricts printing or copying."))
+                    Text(L("Enter the PDF's owner password. If it has only one password, enter that one."))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

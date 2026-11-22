@@ -115,7 +115,6 @@ final class ScannerList: NSObject, ICDeviceBrowserDelegate {
         browser.browsedDeviceTypeMask = Self.mask(network: false)
     }
 
-    /// Scanners connected to this Mac, plus those on the network once the user asks for them.
     static func mask(network: Bool) -> ICDeviceTypeMask {
         var raw = ICDeviceTypeMask.scanner.rawValue | ICDeviceLocationTypeMask.local.rawValue
         if network { raw |= ICDeviceLocationTypeMask.bonjour.rawValue | ICDeviceLocationTypeMask.shared.rawValue }

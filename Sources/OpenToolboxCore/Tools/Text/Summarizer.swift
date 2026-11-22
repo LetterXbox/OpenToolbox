@@ -56,7 +56,6 @@ public enum SummarizerError: Error, Equatable, LocalizedError {
 
 /// Summaries from Apple's on-device language model. Text never leaves the Mac.
 public enum Summarizer {
-    /// Characters per request, well inside the model's context window for any script.
     static let chunkLimit = 2_400
 
     public static var availability: SummarizerAvailability {

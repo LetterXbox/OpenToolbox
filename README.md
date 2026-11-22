@@ -69,7 +69,7 @@ OpenToolbox brings 74 everyday utilities together in a single Swift and SwiftUI 
 | **Transcribe** | Turn speech in audio and video files into text or subtitles (SRT, WebVTT), on-device. |
 | **Summarize** | Summarize text and documents on-device with Apple Intelligence (macOS 26+ on Macs with Apple Intelligence). |
 | **Zip & Unzip** | Create ZIP, 7z, and TAR archives (with optional password encryption for ZIP/7z) and extract ZIP, 7z, RAR, and TAR archives *(on-demand `7zz`)*. |
-| **Convert Documents** | Convert documents between DOCX, RTF, HTML, ODT, TXT, Markdown, and PDF offline. |
+| **Convert Documents** | Convert DOCX, DOC, RTF, HTML, ODT, TXT, and Markdown files into DOCX, RTF, HTML, ODT, TXT, or PDF offline (PDF is output-only; rich documents exported as `.md` save plain text). |
 
 ### Images & PDF
 
@@ -141,8 +141,8 @@ Powered on-device by Apple's Vision, PDFKit, ImageIO, Image Capture, Quick Look,
 Tools that rely on external CLI programs start disabled in **Tool Catalog** and download nothing automatically. Install or remove pinned, SHA-256-verified builds individually in **Engines**:
 
 - **FFmpeg** 9.1 (GPL-3.0-or-later) and **FFprobe** 9.1 (GPL-3.0-or-later)
-- **yt-dlp** 2026.10.26 (Unlicense)
-- **7-Zip (`7zz`)** 26.06 (LGPL-2.1-or-later, BSD-3-Clause)
+- **yt-dlp** 2026.10.26 (GPL-3.0-or-later standalone macOS binary)
+- **7-Zip (`7zz`)** 26.06 (LGPL-2.1-or-later, BSD-2-Clause, BSD-3-Clause, with upstream's unRAR license restriction for RAR decoding)
 - **Ghostscript** 10.07.1 (AGPL-3.0-or-later)
 
 ## Install

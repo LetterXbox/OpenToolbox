@@ -189,7 +189,7 @@ public enum EngineCatalog {
             id: ytDlpID,
             displayName: "yt-dlp",
             summary: "Downloads video and audio from supported websites.",
-            license: "Unlicense",
+            license: "GPL-3.0-or-later",
             homepage: URL(string: "https://github.com/yt-dlp/yt-dlp")!,
             version: "2026.10.26",
             artifacts: [
@@ -213,7 +213,7 @@ public enum EngineCatalog {
             id: sevenZipID,
             displayName: "7-Zip (7zz)",
             summary: "Creates and extracts ZIP, 7z, TAR, and RAR archives.",
-            license: "LGPL-2.1-or-later, BSD-3-Clause",
+            license: "LGPL-2.1-or-later, BSD-2-Clause, BSD-3-Clause, unRAR restriction",
             homepage: URL(string: "https://7-zip.org")!,
             version: "26.06",
             artifacts: [

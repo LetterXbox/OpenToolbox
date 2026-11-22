@@ -419,6 +419,7 @@ struct TrimVideoView: View {
     @State private var saved: URL?
     @State private var failure: String?
     @State private var task: Task<Void, Never>?
+    @State private var probeTask: Task<Void, Never>?
 
     var body: some View {
         ToolPage(tool: tool) {
@@ -446,19 +447,28 @@ struct TrimVideoView: View {
             if let failure { ErrorMessage(text: failure) }
         }
         .onChange(of: files) { loadDuration() }
-        .onDisappear { task?.cancel() }
+        .onDisappear {
+            task?.cancel()
+            probeTask?.cancel()
+        }
         .reportsActivity(isWorking)
     }
 
     private func loadDuration() {
+        probeTask?.cancel()
+        probeTask = nil
         duration = nil
         saved = nil
         failure = nil
         guard let url = files.first, let ffprobe = model.engines.executableURL(for: EngineCatalog.ffprobeID) else { return }
-        Task {
+        probeTask = Task {
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-            if let info = try? await FFmpegTools.probe(url, ffprobe: ffprobe), let length = info.durationSeconds {
+            if let info = try? await FFmpegTools.probe(url, ffprobe: ffprobe),
+               !Task.isCancelled,
+               self.files.first == url,
+               let length = info.durationSeconds
+            {
                 duration = length
                 startText = "0:00"
                 endText = MediaTime.format(length)

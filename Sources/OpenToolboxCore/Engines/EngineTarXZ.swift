@@ -292,14 +292,18 @@ enum EngineTarXZ {
             case UInt8(ascii: "x"):
                 var cursor = data.startIndex
                 while cursor < data.endIndex {
+                    let remaining = data.endIndex - cursor
                     guard let space = data[cursor...].firstIndex(of: 0x20),
                           let lengthText = String(validating: data[cursor..<space], as: UTF8.self),
-                          let recordLength = Int(lengthText), recordLength > 0,
-                          cursor + recordLength <= data.endIndex else {
+                          let recordLength = Int(lengthText),
+                          recordLength > 0,
+                          recordLength <= remaining else {
                         throw EngineStoreError.invalidArchive
                     }
                     let recordEnd = cursor + recordLength
-                    guard data[recordEnd - 1] == 0x0a else { throw EngineStoreError.invalidArchive }
+                    guard space + 1 <= recordEnd - 1, data[recordEnd - 1] == 0x0a else {
+                        throw EngineStoreError.invalidArchive
+                    }
                     let body = data[(space + 1)..<(recordEnd - 1)]
                     if let equals = body.firstIndex(of: UInt8(ascii: "=")),
                        let key = String(validating: body[..<equals], as: UTF8.self),

@@ -27,10 +27,11 @@ final class OfflineHTMLPDFRenderer: NSObject, WKNavigationDelegate {
 
     private static let blockNetworkRulesJSON = """
     [
-      {
-        "trigger": { "url-filter": "^(https?|wss?|ftp)://.*" },
-        "action": { "type": "block" }
-      }
+      { "trigger": { "url-filter": "^http://.*" }, "action": { "type": "block" } },
+      { "trigger": { "url-filter": "^https://.*" }, "action": { "type": "block" } },
+      { "trigger": { "url-filter": "^ws://.*" }, "action": { "type": "block" } },
+      { "trigger": { "url-filter": "^wss://.*" }, "action": { "type": "block" } },
+      { "trigger": { "url-filter": "^ftp://.*" }, "action": { "type": "block" } }
     ]
     """
 
@@ -42,12 +43,13 @@ final class OfflineHTMLPDFRenderer: NSObject, WKNavigationDelegate {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
-        if let ruleList = try await WKContentRuleListStore.default().compileContentRuleList(
-            forIdentifier: "OpenToolboxOfflineBlock",
+        guard let ruleList = try await WKContentRuleListStore.default().compileContentRuleList(
+            forIdentifier: "OpenToolboxOfflineBlockV2",
             encodedContentRuleList: Self.blockNetworkRulesJSON
-        ) {
-            configuration.userContentController.add(ruleList)
+        ) else {
+            throw OfficeDocumentError.conversionFailed(L("Could not initialize offline WebKit content rules."))
         }
+        configuration.userContentController.add(ruleList)
         let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: width, height: 1122), configuration: configuration)
         webView.navigationDelegate = self
         self.webView = webView

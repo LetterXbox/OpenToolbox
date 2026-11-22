@@ -249,13 +249,16 @@ enum EnginePKG {
 
         private mutating func handleHeader(_ header: Data) throws {
             guard header[0..<6].elementsEqual("070707".utf8),
-                  let mode = Self.parseOctal(header[18..<24]),
-                  let nameSize = Self.parseOctal(header[59..<65]),
-                  let fileSize = Self.parseOctal(header[65..<76]),
-                  nameSize > 0, nameSize <= 4_096, fileSize >= 0 else {
+                  let rawMode = Self.parseUnsignedOctal(header[18..<24]),
+                  let mode = UInt32(exactly: rawMode),
+                  let rawNameSize = Self.parseUnsignedOctal(header[59..<65]),
+                  let nameSize = Int(exactly: rawNameSize),
+                  let rawFileSize = Self.parseUnsignedOctal(header[65..<76]),
+                  let fileSize = Int64(exactly: rawFileSize),
+                  nameSize > 0, nameSize <= 4_096 else {
                 throw EngineStoreError.invalidArchive
             }
-            state = .name(mode: UInt32(mode), nameSize: Int(nameSize), fileSize: fileSize)
+            state = .name(mode: mode, nameSize: nameSize, fileSize: fileSize)
         }
 
         private mutating func handleEntry(rawName: Data, mode: UInt32, fileSize: Int64) throws {
@@ -268,7 +271,8 @@ enum EnginePKG {
                 return
             }
 
-            let fileType = mode_t(mode) & S_IFMT
+            guard let posixMode = mode_t(exactly: mode) else { throw EngineStoreError.invalidArchive }
+            let fileType = posixMode & S_IFMT
             let isDirectory = fileType == S_IFDIR
             let cleaned = EnginePKG.stripLeadingDotSlash(name, stripTrailingSlash: isDirectory)
             let baseName = cleaned.split(separator: "/").last.map(String.init) ?? ""
@@ -330,9 +334,12 @@ enum EnginePKG {
             }
         }
 
-        private static func parseOctal(_ slice: Data.SubSequence) -> Int64? {
-            guard let text = String(validating: slice, as: UTF8.self) else { return nil }
-            return Int64(text, radix: 8)
+        private static func parseUnsignedOctal(_ slice: Data.SubSequence) -> UInt64? {
+            guard !slice.isEmpty, slice.allSatisfy({ (UInt8(ascii: "0")...UInt8(ascii: "7")).contains($0) }),
+                  let text = String(validating: slice, as: UTF8.self) else {
+                return nil
+            }
+            return UInt64(text, radix: 8)
         }
     }
 

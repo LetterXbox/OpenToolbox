@@ -35,6 +35,7 @@ struct MediaInfoView: View {
     @State private var info: MediaProbeInfo?
     @State private var isLoading = false
     @State private var failure: String?
+    @State private var probeTask: Task<Void, Never>?
 
     var body: some View {
         ToolPage(tool: tool) {
@@ -129,22 +130,34 @@ struct MediaInfoView: View {
             }
         }
         .onChange(of: files) { inspect() }
+        .onDisappear { probeTask?.cancel() }
         .reportsActivity(isLoading)
     }
 
     private func inspect() {
+        probeTask?.cancel()
+        probeTask = nil
         info = nil
         failure = nil
-        guard let url = files.first, let ffprobe = model.engines.executableURL(for: EngineCatalog.ffprobeID) else { return }
+        guard let url = files.first, let ffprobe = model.engines.executableURL(for: EngineCatalog.ffprobeID) else {
+            isLoading = false
+            return
+        }
         isLoading = true
-        Task {
-            defer { isLoading = false }
+        probeTask = Task {
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             do {
-                info = try await FFmpegTools.probe(url, ffprobe: ffprobe)
+                let probed = try await FFmpegTools.probe(url, ffprobe: ffprobe)
+                guard !Task.isCancelled, self.files.first == url else { return }
+                info = probed
+                isLoading = false
+            } catch is CancellationError {
+                if self.files.first == url { isLoading = false }
             } catch {
+                guard !Task.isCancelled, self.files.first == url else { return }
                 failure = error.localizedDescription
+                isLoading = false
             }
         }
     }

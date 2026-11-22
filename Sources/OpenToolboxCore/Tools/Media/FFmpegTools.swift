@@ -176,10 +176,10 @@ public struct AudioCleanupOptions: Equatable, Sendable {
 
 /// Argument builders and async runners for all FFmpeg / FFprobe media tools.
 public enum FFmpegTools {
-    public typealias Runner = @Sendable (URL, [String], (@Sendable (String) -> Void)?) async throws -> EngineProcessResult
+    public typealias Runner = @Sendable (URL, [String], URL?, (@Sendable (String) -> Void)?) async throws -> EngineProcessResult
 
-    public static let defaultRunner: Runner = { exe, args, onStdoutLine in
-        try await EngineProcess.run(exe, arguments: args, onStdoutLine: onStdoutLine)
+    public static let defaultRunner: Runner = { exe, args, cwd, onStdoutLine in
+        try await EngineProcess.run(exe, arguments: args, currentDirectory: cwd, onStdoutLine: onStdoutLine)
     }
 
     public static func probeArguments(input: URL) -> [String] {
@@ -197,7 +197,7 @@ public enum FFmpegTools {
         ffprobe: URL,
         runner: Runner = defaultRunner
     ) async throws -> MediaProbeInfo {
-        let result = try await runner(ffprobe, probeArguments(input: source), nil)
+        let result = try await runner(ffprobe, probeArguments(input: source), nil, nil)
         guard result.exitCode == 0 else {
             throw EngineProcessError.failed(
                 command: ffprobe.lastPathComponent,
@@ -617,16 +617,21 @@ public enum FFmpegTools {
         let base = sources[0].deletingPathExtension().lastPathComponent
         if !reencodeToMatch {
             let listFile = staging.appending(path: "concat.txt", directoryHint: .notDirectory)
-            let lines = sources.map { url -> String in
-                let escaped = url.path.replacingOccurrences(of: "'", with: "'\\''")
-                return "file '\(escaped)'"
+            var lines: [String] = []
+            for (index, url) in sources.enumerated() {
+                let rawExt = url.pathExtension.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+                let clipName = rawExt.isEmpty ? "clip-\(index).mp4" : "clip-\(index).\(rawExt)"
+                let linkURL = staging.appending(path: clipName, directoryHint: .notDirectory)
+                try FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: url)
+                lines.append("file '\(clipName)'")
             }
             try lines.joined(separator: "\n").write(to: listFile, atomically: true, encoding: .utf8)
             let ext = sources[0].pathExtension.isEmpty ? "mp4" : sources[0].pathExtension.lowercased()
-            let args = ["-f", "concat", "-safe", "0", "-i", listFile.path, "-c", "copy"]
+            let args = ["-f", "concat", "-safe", "1", "-i", "concat.txt", "-c", "copy"]
             return try await runToOutput(
                 ffmpeg: ffmpeg,
                 arguments: args,
+                currentDirectory: staging,
                 preferredName: "\(base) merged.\(ext)",
                 fileExtension: ext,
                 durationSeconds: totalDuration > 0 ? totalDuration : nil,
@@ -735,6 +740,11 @@ public enum FFmpegTools {
             "-i", audio.path,
             "-map", "0:v:0", "-map", "1:a:0",
             "-c:v", "copy",
+        ]
+        if !loopAudioToFit {
+            args += ["-af", "apad"]
+        }
+        args += [
             "-c:a", "aac", "-b:a", "192k",
             "-shortest",
             "-movflags", "+faststart",
@@ -1004,6 +1014,7 @@ public enum FFmpegTools {
     private static func runToOutput(
         ffmpeg: URL,
         arguments: [String],
+        currentDirectory: URL? = nil,
         preferredName: String,
         fileExtension: String,
         durationSeconds: Double?,
@@ -1021,7 +1032,7 @@ public enum FFmpegTools {
             "-progress", "pipe:1", "-y",
         ] + arguments + [tempOut.path]
 
-        let result = try await runner(ffmpeg, fullArgs) { line in
+        let result = try await runner(ffmpeg, fullArgs, currentDirectory) { line in
             if let fraction = parseProgressLine(line, durationSeconds: durationSeconds) {
                 progress(fraction)
             }

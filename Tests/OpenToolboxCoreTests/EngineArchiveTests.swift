@@ -203,7 +203,7 @@ struct EngineArchiveTests {
         }
     }
 
-    @Test func engineProcessStreamsLinesAndCancels() async throws {
+    @Test func engineProcessStreamsLinesAndCancelsProcessGroup() async throws {
         let lines = LineRecorder()
         let result = try await EngineProcess.run(
             URL(fileURLWithPath: "/bin/sh"),
@@ -213,13 +213,108 @@ struct EngineArchiveTests {
         #expect(result.exitCode == 0)
         #expect(lines.values == ["one", "two", "three"])
 
+        let pidBox = LineRecorder()
         let task = Task {
-            try await EngineProcess.run(URL(fileURLWithPath: "/bin/sleep"), arguments: ["30"])
+            try await EngineProcess.run(
+                URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "sleep 30 & echo $!; wait"],
+                onStdoutLine: { pidBox.append($0) }
+            )
         }
-        try await Task.sleep(for: .milliseconds(100))
+        var childPID: pid_t?
+        for _ in 0..<40 {
+            if let first = pidBox.values.first, let parsed = pid_t(first.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                childPID = parsed
+                break
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        let spawnedPID = try #require(childPID)
         task.cancel()
         await #expect(throws: CancellationError.self) {
             try await task.value
+        }
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(kill(spawnedPID, 0) != 0)
+    }
+
+    @Test func tarXzRejectsMalformedPAXLengthWithoutTrapping() async throws {
+        try await withTemporaryDirectory { directory in
+            let paxData = Data("9223372036854775807 path=x\n".utf8)
+            let tar = Self.makeTar(entries: [
+                (name: "pax", typeFlag: UInt8(ascii: "x"), data: paxData),
+                (name: "7zz", typeFlag: UInt8(ascii: "0"), data: Data("bin".utf8)),
+            ])
+            let compressed = try Self.compressXZ(tar)
+            let fixture = directory.appending(path: "badpax.tar.xz")
+            try compressed.write(to: fixture)
+            let sha = HashGenerator.hash(compressed, algorithm: .sha256)
+            let url = URL(string: "https://downloads.example.invalid/badpax.tar.xz")!
+            let store = EngineStore(
+                rootDirectory: directory.appending(path: "engines", directoryHint: .isDirectory),
+                downloader: LocalFileDownloader(files: [url: fixture])
+            )
+            let manifest = EngineManifest(
+                id: "tar-pax",
+                displayName: "BadPAX",
+                summary: "Test",
+                license: "MIT",
+                homepage: URL(string: "https://example.invalid")!,
+                version: "1.0",
+                artifacts: [
+                    EngineArtifact(
+                        architecture: .current,
+                        url: url,
+                        sha256: sha,
+                        sizeBytes: Int64(compressed.count),
+                        payload: .tarXz(executablePath: "7zz")
+                    )
+                ]
+            )
+            await #expect(throws: EngineStoreError.invalidArchive) {
+                try await store.install(manifest)
+            }
+        }
+    }
+
+    @Test func pkgRejectsNegativeOctalModeWithoutTrapping() async throws {
+        try await withTemporaryDirectory { directory in
+            let badHeader = Data("070707000000000001-000010000000000000000010000000000000000000001300000000000".utf8)
+            let body = Data("./a\0".utf8)
+            let cpio = badHeader + body
+            let pkgData = try Self.makePKG(payloadPath: "Sub.pkg/Payload", cpioData: cpio)
+            let fixture = directory.appending(path: "badmode.pkg")
+            try pkgData.write(to: fixture)
+            let sha = HashGenerator.hash(pkgData, algorithm: .sha256)
+            let url = URL(string: "https://downloads.example.invalid/badmode.pkg")!
+            let store = EngineStore(
+                rootDirectory: directory.appending(path: "engines", directoryHint: .isDirectory),
+                downloader: LocalFileDownloader(files: [url: fixture])
+            )
+            let manifest = EngineManifest(
+                id: "pkg-mode",
+                displayName: "BadMode",
+                summary: "Test",
+                license: "AGPL-3.0-or-later",
+                homepage: URL(string: "https://example.invalid")!,
+                version: "1.0",
+                artifacts: [
+                    EngineArtifact(
+                        architecture: .current,
+                        url: url,
+                        sha256: sha,
+                        sizeBytes: Int64(pkgData.count),
+                        payload: .pkg(
+                            payloadPath: "Sub.pkg/Payload",
+                            executablePath: "a",
+                            includedPrefixes: ["a"]
+                        )
+                    )
+                ]
+            )
+            await #expect(throws: EngineStoreError.invalidArchive) {
+                try await store.install(manifest)
+            }
         }
     }
 

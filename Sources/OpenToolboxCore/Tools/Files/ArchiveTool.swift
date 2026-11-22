@@ -44,6 +44,7 @@ public enum ArchiveToolError: Error, Equatable, LocalizedError {
     case unsafeArchiveEntry(String)
     case wrongPassword
     case passwordUnsupportedForFormat
+    case invalidPassword
 
     public var errorDescription: String? {
         switch self {
@@ -57,6 +58,8 @@ public enum ArchiveToolError: Error, Equatable, LocalizedError {
             coreLocalized("The archive password is missing or incorrect.")
         case .passwordUnsupportedForFormat:
             coreLocalized("TAR archives do not support password encryption.")
+        case .invalidPassword:
+            coreLocalized("Archive passwords cannot contain line breaks.")
         }
     }
 }
@@ -73,18 +76,21 @@ public struct ArchiveExtractResult: Equatable, Sendable {
 
 /// Creates and extracts archives (ZIP, 7z, RAR, TAR, GZ, BZ2, XZ) via on-demand `7zz`.
 public enum ArchiveTool {
-    public typealias Runner = @Sendable (URL, [String]) async throws -> EngineProcessResult
+    public typealias Runner = @Sendable (URL, [String], Data?) async throws -> EngineProcessResult
+
+    public static let defaultRunner: Runner = { exe, args, stdinData in
+        try await EngineProcess.run(exe, arguments: args, standardInput: stdinData)
+    }
 
     public static func compressArguments(
         inputs: [URL],
         destination: URL,
         format: ArchiveFormat,
         level: ArchiveCompressionLevel,
-        password: String?
+        hasPassword: Bool
     ) throws -> [String] {
         guard !inputs.isEmpty else { throw ArchiveToolError.noInputs }
-        let secret = password ?? ""
-        if !secret.isEmpty, !format.supportsPassword {
+        if hasPassword, !format.supportsPassword {
             throw ArchiveToolError.passwordUnsupportedForFormat
         }
         var args = [
@@ -93,14 +99,15 @@ public enum ArchiveTool {
             "-mx=\(level.rawValue)",
             "-y",
             "-bd",
+            "-spd",
         ]
-        if !secret.isEmpty {
+        if hasPassword {
             if format == .zip {
                 args.append("-mem=AES256")
             } else if format == .sevenZip {
                 args.append("-mhe=on")
             }
-            args.append("-p\(secret)")
+            args.append("-p")
         }
         args.append("--")
         args.append(destination.path)
@@ -110,15 +117,13 @@ public enum ArchiveTool {
 
     public static func extractArguments(
         archive: URL,
-        destinationDirectory: URL,
-        password: String?
+        destinationDirectory: URL
     ) -> [String] {
-        let secret = password ?? ""
-        return [
+        [
             "x",
             "-y",
             "-bd",
-            "-p\(secret)",
+            "-spd",
             "-o\(destinationDirectory.path)",
             "--",
             archive.path,
@@ -134,9 +139,13 @@ public enum ArchiveTool {
         executable: URL,
         output: OutputDirectory,
         tool: ToolID,
-        runner: Runner = { exe, args in try await EngineProcess.run(exe, arguments: args) }
+        runner: Runner = defaultRunner
     ) async throws -> URL {
         guard !inputs.isEmpty else { throw ArchiveToolError.noInputs }
+        let secret = password ?? ""
+        if secret.contains("\n") || secret.contains("\r") {
+            throw ArchiveToolError.invalidPassword
+        }
         let baseName = archiveName.trimmingCharacters(in: .whitespacesAndNewlines)
         let stem = baseName.isEmpty
             ? (inputs.count == 1 ? inputs[0].deletingPathExtension().lastPathComponent : "Archive")
@@ -157,9 +166,10 @@ public enum ArchiveTool {
             destination: tempArchive,
             format: format,
             level: level,
-            password: password
+            hasPassword: !secret.isEmpty
         )
-        let result = try await runner(executable, args)
+        let stdinData = secret.isEmpty ? nil : Data("\(secret)\n\(secret)\n".utf8)
+        let result = try await runner(executable, args, stdinData)
         guard result.exitCode == 0 else {
             throw EngineProcessError.failed(
                 command: executable.lastPathComponent,
@@ -178,8 +188,12 @@ public enum ArchiveTool {
         executable: URL,
         output: OutputDirectory,
         tool: ToolID,
-        runner: Runner = { exe, args in try await EngineProcess.run(exe, arguments: args) }
+        runner: Runner = defaultRunner
     ) async throws -> ArchiveExtractResult {
+        let secret = password ?? ""
+        if secret.contains("\n") || secret.contains("\r") {
+            throw ArchiveToolError.invalidPassword
+        }
         let staging = try FileManager.default.url(
             for: .itemReplacementDirectory,
             in: .userDomainMask,
@@ -191,8 +205,9 @@ public enum ArchiveTool {
         let extractRoot = staging.appending(path: "extracted", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: extractRoot, withIntermediateDirectories: false)
 
-        let args = extractArguments(archive: archive, destinationDirectory: extractRoot, password: password)
-        let result = try await runner(executable, args)
+        let args = extractArguments(archive: archive, destinationDirectory: extractRoot)
+        let stdinData = Data("\(secret)\n".utf8)
+        let result = try await runner(executable, args, stdinData)
         guard result.exitCode == 0 else {
             let combined = result.stderrString + "\n" + result.stdoutString
             if isWrongPassword(combined) {

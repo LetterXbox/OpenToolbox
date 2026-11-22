@@ -139,7 +139,7 @@ public enum ToolCatalog {
             requiredEngines: [EngineCatalog.sevenZipID]),
         ToolDescriptor(
             id: "docs.convert", category: .textAndFiles,
-            title: "Convert Documents", summary: "Convert documents between DOCX, RTF, HTML, ODT, TXT, Markdown, and PDF.",
+            title: "Convert Documents", summary: "Convert DOCX, DOC, RTF, HTML, ODT, TXT, and Markdown files, or export them to PDF.",
             symbolName: "doc.on.doc.fill", keywords: ["document", "convert", "docx", "rtf", "html", "odt", "txt", "markdown", "pdf"]),
     ]
 

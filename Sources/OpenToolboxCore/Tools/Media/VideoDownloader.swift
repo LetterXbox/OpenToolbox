@@ -53,6 +53,8 @@ public enum VideoDownloader {
         outputDirectory: URL
     ) -> [String] {
         var args = [
+            "--ignore-config",
+            "--no-plugin-dirs",
             "--no-playlist",
             "--no-color",
             "--newline",

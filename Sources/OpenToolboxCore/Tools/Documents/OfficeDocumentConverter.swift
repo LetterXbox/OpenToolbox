@@ -33,12 +33,12 @@ public enum DocumentTargetFormat: String, CaseIterable, Sendable, Identifiable {
     public var displayName: String {
         switch self {
         case .pdf: "PDF"
-        case .docx: "Word (.docx)"
-        case .rtf: "Rich Text (.rtf)"
+        case .docx: coreLocalized("Word (.docx)")
+        case .rtf: coreLocalized("Rich Text (.rtf)")
         case .html: "HTML (.html)"
-        case .odt: "OpenDocument (.odt)"
-        case .txt: "Plain Text (.txt)"
-        case .md: "Markdown (.md)"
+        case .odt: coreLocalized("OpenDocument (.odt)")
+        case .txt: coreLocalized("Plain Text (.txt)")
+        case .md: coreLocalized("Markdown (.md, plain text from rich documents)")
         }
     }
 
@@ -88,7 +88,7 @@ public enum OfficeDocumentConverter {
     }
 
     public static func textutilArguments(input: URL, output: URL, format: String) -> [String] {
-        ["-convert", format, "-output", output.path, input.path]
+        ["-convert", format, "-noload", "-output", output.path, input.path]
     }
 
     /// Generates an offline HTML preview for `.docx`, `.doc`, `.pptx`, `.ppt`, `.xlsx`, `.xls`,

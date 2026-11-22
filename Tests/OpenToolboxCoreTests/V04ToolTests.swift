@@ -98,23 +98,50 @@ struct V04ToolTests {
 
             let zipArgs = try ArchiveTool.compressArguments(
                 inputs: [fileA], destination: directory.appending(path: "out.zip"),
-                format: .zip, level: .balanced, password: "secret"
+                format: .zip, level: .balanced, hasPassword: true
             )
+            #expect(zipArgs.contains("-spd"))
             #expect(zipArgs.contains("-mem=AES256"))
-            #expect(zipArgs.contains("-psecret"))
+            #expect(zipArgs.contains("-p"))
+            #expect(!zipArgs.contains { $0.hasPrefix("-p") && $0.count > 2 })
 
             let sevenArgs = try ArchiveTool.compressArguments(
                 inputs: [fileA], destination: directory.appending(path: "out.7z"),
-                format: .sevenZip, level: .maximum, password: "secret"
+                format: .sevenZip, level: .maximum, hasPassword: true
             )
+            #expect(sevenArgs.contains("-spd"))
             #expect(sevenArgs.contains("-mhe=on"))
+            #expect(sevenArgs.contains("-p"))
 
             #expect(throws: ArchiveToolError.passwordUnsupportedForFormat) {
                 try ArchiveTool.compressArguments(
                     inputs: [fileA], destination: directory.appending(path: "out.tar"),
-                    format: .tar, level: .store, password: "secret"
+                    format: .tar, level: .store, hasPassword: true
                 )
             }
+
+            let output = OutputDirectory(baseDirectory: directory.appending(path: "out"))
+            await #expect(throws: ArchiveToolError.invalidPassword) {
+                try await ArchiveTool.compress(
+                    [fileA], archiveName: "bad", format: .zip, password: "a\nb",
+                    executable: URL(fileURLWithPath: "/usr/bin/true"), output: output, tool: "files.archive"
+                ) { _, _, _ in
+                    EngineProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+                }
+            }
+
+            let compressed = try await ArchiveTool.compress(
+                [fileA], archiveName: "secret", format: .zip, password: "pw",
+                executable: URL(fileURLWithPath: "/usr/bin/true"), output: output, tool: "files.archive"
+            ) { _, args, stdinData in
+                #expect(args.contains("-spd"))
+                #expect(!args.contains { $0.contains("pw") })
+                #expect(stdinData == Data("pw\npw\n".utf8))
+                let sep = try #require(args.firstIndex(of: "--"))
+                try Data("zip".utf8).write(to: URL(fileURLWithPath: args[sep + 1]))
+                return EngineProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+            #expect(compressed.lastPathComponent == "secret.zip")
 
             #expect(ArchiveTool.archiveStem(for: URL(fileURLWithPath: "/tmp/demo.tar.gz")) == "demo")
             #expect(ArchiveTool.archiveStem(for: URL(fileURLWithPath: "/tmp/demo.7z")) == "demo")
@@ -129,13 +156,15 @@ struct V04ToolTests {
                 try ArchiveTool.auditExtractedTree(at: extractDir)
             }
 
-            let output = OutputDirectory(baseDirectory: directory.appending(path: "out"))
             let archive = directory.appending(path: "sample.zip")
             try Data("fake".utf8).write(to: archive)
 
             let extracted = try await ArchiveTool.extract(
-                archive, executable: URL(fileURLWithPath: "/usr/bin/true"), output: output, tool: "files.archive"
-            ) { _, args in
+                archive, password: "pw", executable: URL(fileURLWithPath: "/usr/bin/true"), output: output, tool: "files.archive"
+            ) { _, args, stdinData in
+                #expect(args.contains("-spd"))
+                #expect(!args.contains { $0.contains("pw") })
+                #expect(stdinData == Data("pw\n".utf8))
                 let destFlag = try #require(args.first { $0.hasPrefix("-o") })
                 let dest = URL(fileURLWithPath: String(destFlag.dropFirst(2)))
                 try Data("one".utf8).write(to: dest.appending(path: "one.txt"))
@@ -148,7 +177,7 @@ struct V04ToolTests {
             await #expect(throws: ArchiveToolError.wrongPassword) {
                 try await ArchiveTool.extract(
                     archive, password: "bad", executable: URL(fileURLWithPath: "/usr/bin/true"), output: output, tool: "files.archive"
-                ) { _, _ in
+                ) { _, _, _ in
                     EngineProcessResult(exitCode: 2, stdout: Data(), stderr: Data("ERROR: Wrong password".utf8))
                 }
             }
@@ -186,6 +215,13 @@ struct V04ToolTests {
 
     @Test func officeConverterStagesQuickLookAndFallsBackToTextutil() async throws {
         try await withTemporaryDirectory { directory in
+            let tuArgs = OfficeDocumentConverter.textutilArguments(
+                input: directory.appending(path: "page.html"),
+                output: directory.appending(path: "out.rtf"),
+                format: "rtf"
+            )
+            #expect(tuArgs.contains("-noload"))
+
             let docx = directory.appending(path: "memo.docx")
             try Data("fake".utf8).write(to: docx)
 
@@ -303,7 +339,7 @@ struct V04ToolTests {
 
             let output = OutputDirectory(baseDirectory: directory.appending(path: "out"))
             let fakeFFmpeg = URL(fileURLWithPath: "/usr/bin/true")
-            let mockRunner: FFmpegTools.Runner = { _, args, onLine in
+            let mockRunner: FFmpegTools.Runner = { _, args, _, onLine in
                 onLine?("out_time_us=5000000")
                 onLine?("progress=end")
                 if let outPath = args.last {
@@ -324,8 +360,37 @@ struct V04ToolTests {
             let burned = try await FFmpegTools.burnInSubtitles(video: video, subtitles: subs, ffmpeg: fakeFFmpeg, ffprobe: nil, output: output, tool: "media.burn-subtitles", runner: mockRunner)
             #expect(burned.lastPathComponent == "clip subtitled.mp4")
 
-            let replaced = try await FFmpegTools.replaceAudio(video: video, audio: audio, loopAudioToFit: true, ffmpeg: fakeFFmpeg, ffprobe: nil, output: output, tool: "media.replace-audio", runner: mockRunner)
-            #expect(replaced.lastPathComponent == "clip new audio.mp4")
+            let replacedNoLoop = try await FFmpegTools.replaceAudio(
+                video: video, audio: audio, loopAudioToFit: false, ffmpeg: fakeFFmpeg, ffprobe: nil,
+                output: output, tool: "media.replace-audio"
+            ) { _, args, _, _ in
+                #expect(args.contains("-af"))
+                #expect(args.contains("apad"))
+                #expect(args.contains("-shortest"))
+                if let outPath = args.last {
+                    try Data("rendered".utf8).write(to: URL(fileURLWithPath: outPath))
+                }
+                return EngineProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+            #expect(replacedNoLoop.lastPathComponent == "clip new audio.mp4")
+
+            let newlineClip = directory.appending(path: "clip\nsecond.mp4")
+            try Data("v2".utf8).write(to: newlineClip)
+            let merged = try await FFmpegTools.mergeVideos(
+                [video, newlineClip], reencodeToMatch: false, ffmpeg: fakeFFmpeg, ffprobe: nil,
+                output: output, tool: "media.merge-videos"
+            ) { _, args, cwd, _ in
+                #expect(args.contains("-safe"))
+                #expect(args.contains("1"))
+                let stage = try #require(cwd)
+                let list = try String(contentsOf: stage.appending(path: "concat.txt"), encoding: .utf8)
+                #expect(list == "file 'clip-0.mp4'\nfile 'clip-1.mp4'")
+                if let outPath = args.last {
+                    try Data("merged".utf8).write(to: URL(fileURLWithPath: outPath))
+                }
+                return EngineProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+            }
+            #expect(merged.lastPathComponent == "clip merged.mp4")
 
             let convertedAudio = try await FFmpegTools.convertAudio(audio, format: .flac, ffmpeg: fakeFFmpeg, ffprobe: nil, output: output, tool: "media.convert-audio", runner: mockRunner)
             #expect(convertedAudio.lastPathComponent == "track.flac")
@@ -354,6 +419,8 @@ struct V04ToolTests {
                 output: output,
                 tool: "media.download",
                 runner: { _, args, onLine in
+                    #expect(args.contains("--ignore-config"))
+                    #expect(args.contains("--no-plugin-dirs"))
                     let pIdx = try #require(args.firstIndex(of: "-P"))
                     let staging = URL(fileURLWithPath: args[pIdx + 1])
                     let media = staging.appending(path: "Sample_Video.mp4")

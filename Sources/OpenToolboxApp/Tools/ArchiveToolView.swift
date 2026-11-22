@@ -58,7 +58,7 @@ struct ArchiveToolView: View {
             } else {
                 FileDropList(
                     files: $files,
-                    allowedTypes: [.item],
+                    allowedTypes: [.item, .folder],
                     prompt: L("Drop files or folders to archive")
                 )
                 Form {
@@ -129,7 +129,6 @@ struct ArchiveToolView: View {
             }
             do {
                 if mode == .extract {
-                    var outputs: [URL] = []
                     var totalFiles = 0
                     for archive in files {
                         if Task.isCancelled { break }
@@ -140,12 +139,9 @@ struct ArchiveToolView: View {
                             output: output,
                             tool: toolID
                         )
-                        outputs.append(res.output)
+                        savedURLs.append(res.output)
                         totalFiles += res.extractedFileCount
-                    }
-                    savedURLs = outputs
-                    if !outputs.isEmpty {
-                        summaryMessage = L("Extracted \(totalFiles) files into \(outputs.count) item(s).")
+                        summaryMessage = L("Extracted \(totalFiles) files into \(savedURLs.count) item(s).")
                     }
                 } else {
                     let saved = try await ArchiveTool.compress(

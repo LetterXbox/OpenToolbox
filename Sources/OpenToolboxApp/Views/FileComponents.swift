@@ -83,9 +83,12 @@ struct FileDropList: View {
     }
 
     private func add(_ urls: [URL]) {
+        let acceptsAnyItem = allowedTypes.contains(.item)
         let accepted = urls.filter { url in
             guard url.isFileURL else { return false }
-            let type = UTType(filenameExtension: url.pathExtension)
+            if acceptsAnyItem { return true }
+            let type = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)
+                ?? UTType(filenameExtension: url.pathExtension)
             return allowedTypes.contains { type?.conforms(to: $0) ?? false }
         }
         if allowsMultiple {

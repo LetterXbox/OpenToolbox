@@ -464,6 +464,8 @@ struct FindDuplicatesView: View {
     @State private var groups: [DuplicateGroup] = []
     @State private var selected: Set<URL> = []
     @State private var confirmingTrash = false
+    @State private var trashOutcomes: [DuplicateTrashOutcome] = []
+    @State private var filesNeedingRescan: Set<URL> = []
     @State private var status: String?
     @State private var errorMessage: String?
 
@@ -483,6 +485,7 @@ struct FindDuplicatesView: View {
                     if let status { Text(status).foregroundStyle(.secondary) }
                     if let errorMessage { ErrorMessage(text: errorMessage) }
                     if !groups.isEmpty { results }
+                    if !trashOutcomes.isEmpty { trashReport }
                 }
             }
         }
@@ -563,7 +566,10 @@ struct FindDuplicatesView: View {
     }
 
     private var results: some View {
-        let reclaimable = groups.reduce(Int64(0)) { $0 + $1.wastedBytes }
+        let reclaimable = groups.reduce(Int64(0)) { total, group in
+            let count = group.files.count(where: { !filesNeedingRescan.contains($0.url) })
+            return total + Int64(max(0, count - 1)) * (group.files.first?.size ?? 0)
+        }
         return Pane(L("Duplicate Groups"), accessory: {
             Button(L("Move to Trash…")) { confirmingTrash = true }
                 .disabled(selected.isEmpty || session.isRecycling || session.isRenaming)
@@ -580,17 +586,24 @@ struct FindDuplicatesView: View {
 
     private func groupCard(_ group: DuplicateGroup) -> some View {
         let selectedCount = group.files.count(where: { selected.contains($0.url) })
+        let eligibleCount = group.files.count(where: { !filesNeedingRescan.contains($0.url) })
         return VStack(alignment: .leading, spacing: 8) {
-            Text(L("\(group.files.count) copies · \(group.wastedBytes.formatted(.byteCount(style: .file))) reclaimable"))
+            Text(eligibleCount == group.files.count
+                ? L("\(group.files.count) copies · \(group.wastedBytes.formatted(.byteCount(style: .file))) reclaimable")
+                : L("Scan again to update this group."))
                 .font(.headline)
             ForEach(group.files) { file in
                 let isSelected = selected.contains(file.url)
+                let needsRescan = filesNeedingRescan.contains(file.url)
                 HStack(spacing: 8) {
                     Toggle(isOn: Binding(
                         get: { selected.contains(file.url) },
                         set: { value in
                             if value {
-                                if group.files.count(where: { !selected.contains($0.url) }) > 1 {
+                                let remaining = group.files.count {
+                                    !selected.contains($0.url) && !filesNeedingRescan.contains($0.url)
+                                }
+                                if !filesNeedingRescan.contains(file.url) && remaining > 1 {
                                     selected.insert(file.url)
                                 }
                             } else {
@@ -604,9 +617,9 @@ struct FindDuplicatesView: View {
                             .help(file.url.path)
                     }
                     .toggleStyle(.checkbox)
-                    .disabled(session.isRecycling || (!isSelected && selectedCount >= group.files.count - 1))
+                    .disabled(session.isRecycling || needsRescan || (!isSelected && eligibleCount - selectedCount <= 1))
                     Spacer(minLength: 8)
-                    Text(file.modificationDate.formatted(date: .abbreviated, time: .shortened))
+                    Text(needsRescan ? L("Scan again") : file.modificationDate.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     InlineCopyButton(text: file.url.path)
@@ -616,6 +629,7 @@ struct FindDuplicatesView: View {
                         Image(systemName: "folder")
                     }
                     .buttonStyle(.borderless)
+                    .disabled(needsRescan)
                     .help(L("Reveal in Finder"))
                     .accessibilityLabel(L("Reveal in Finder"))
                 }
@@ -623,6 +637,34 @@ struct FindDuplicatesView: View {
         }
         .padding(10)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var trashReport: some View {
+        Pane(L("Last Trash Results")) {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(trashOutcomes) { outcome in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(outcome.original.path)
+                        Text(trashMessage(outcome.disposition))
+                            .foregroundStyle(.secondary)
+                    }
+                    .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private func trashMessage(_ disposition: DuplicateTrashOutcome.Disposition) -> String {
+        switch disposition {
+        case .trashed(let destination):
+            L("Moved to Trash at “\(destination.path)”.")
+        case .restored(let destination, let reason):
+            L("Restored to “\(destination.path)”. \(reason)")
+        case .uncertain(let reason):
+            reason
+        case .skipped(let reason):
+            L("Skipped. \(reason)")
+        }
     }
 
     private func scan() {
@@ -663,6 +705,7 @@ struct FindDuplicatesView: View {
         progress = DuplicateScanProgress()
         groups = []
         selected = []
+        filesNeedingRescan = []
         status = nil
         errorMessage = nil
     }
@@ -682,6 +725,7 @@ struct FindDuplicatesView: View {
         session.isRecycling = true
         errorMessage = nil
         status = nil
+        trashOutcomes = []
         let requested = selected
         let groups = self.groups
         let folders = self.folders
@@ -690,11 +734,17 @@ struct FindDuplicatesView: View {
             let result = await Task.detached(priority: .userInitiated) {
                 withFileToolAccess(folders) { DuplicateScanner.trashSelected(requested, in: groups) }
             }.value
-            self.groups = groups.compactMap { $0.removingFiles(at: result.moved) }
-            selected.subtract(result.moved)
-            status = L("Moved \(result.moved.count) files to Trash.")
-            if !result.issues.isEmpty {
-                errorMessage = result.issues.map { L("\($0.file.path): \($0.message)") }.joined(separator: "\n")
+            let removed = result.removedFromResults
+            self.groups = groups.compactMap { $0.removingFiles(at: removed) }
+            selected.subtract(requested)
+            trashOutcomes = result.outcomes
+            for outcome in result.outcomes where !removed.contains(outcome.original) {
+                switch outcome.disposition {
+                case .restored, .uncertain:
+                    filesNeedingRescan.insert(outcome.original)
+                case .trashed, .skipped:
+                    break
+                }
             }
         }
     }

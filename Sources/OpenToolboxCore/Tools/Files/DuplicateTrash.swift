@@ -1,133 +1,181 @@
 import Darwin
 import Foundation
 
-public struct DuplicateTrashIssue: Sendable {
-    public let file: URL
-    public let message: String
+public struct DuplicateTrashOutcome: Identifiable, Sendable {
+    public enum Disposition: Equatable, Sendable {
+        case trashed(URL)
+        case restored(to: URL, reason: String)
+        case uncertain(reason: String)
+        case skipped(reason: String)
+    }
+
+    public var id: URL { original }
+    public let original: URL
+    public let disposition: Disposition
+    let removeFromResults: Bool
 }
 
 public struct DuplicateTrashResult: Sendable {
-    public let moved: Set<URL>
-    public let issues: [DuplicateTrashIssue]
+    public let outcomes: [DuplicateTrashOutcome]
+
+    public var removedFromResults: Set<URL> {
+        Set(outcomes.filter(\.removeFromResults).map(\.original))
+    }
 }
 
 extension DuplicateScanner {
     public static func trashSelected(_ selected: Set<URL>, in groups: [DuplicateGroup]) -> DuplicateTrashResult {
-        trashSelected(selected, in: groups) { staged in
+        let manager = FileManager.default
+        return trashSelected(selected, in: groups, trashDirectory: { parent in
+            try? manager.url(for: .trashDirectory, in: .userDomainMask, appropriateFor: parent, create: false)
+        }) { source in
             var receipt: NSURL?
-            try FileManager.default.trashItem(at: staged, resultingItemURL: &receipt)
-            guard let receipt else { throw DuplicateTrashError.unverifiedTrash }
-            return receipt as URL
+            try manager.trashItem(at: source, resultingItemURL: &receipt)
+            return receipt?.filePathURL
         }
     }
 
     static func trashSelected(
-        _ selected: Set<URL>, in groups: [DuplicateGroup], trashItem: (URL) throws -> URL
+        _ selected: Set<URL>, in groups: [DuplicateGroup],
+        trashDirectory: (URL) -> URL? = { _ in nil },
+        trashItem: (URL) throws -> URL?
     ) -> DuplicateTrashResult {
-        var moved = Set<URL>()
-        var issues: [DuplicateTrashIssue] = []
+        var outcomes: [DuplicateTrashOutcome] = []
         for group in groups {
             let survivors = group.files.filter { !selected.contains($0.url) }
             for candidate in group.files where selected.contains(candidate.url) {
+                let disposition: DuplicateTrashOutcome.Disposition
                 do {
-                    try trash(candidate, keeping: survivors, dataHash: group.dataHash, using: trashItem)
-                    moved.insert(candidate.url)
+                    disposition = try trash(
+                        candidate, keeping: survivors, dataHash: group.dataHash,
+                        trashDirectory: trashDirectory, using: trashItem
+                    )
                 } catch {
-                    issues.append(DuplicateTrashIssue(file: candidate.url, message: error.localizedDescription))
+                    disposition = .skipped(reason: error.localizedDescription)
                 }
+                let removeFromResults: Bool
+                switch disposition {
+                case .trashed:
+                    removeFromResults = true
+                case .restored(let destination, _) where destination.path == candidate.url.path:
+                    removeFromResults = false
+                default:
+                    removeFromResults = FileToolDisk.snapshot(at: candidate.url)?.identity != candidate.snapshot.identity
+                }
+                outcomes.append(DuplicateTrashOutcome(
+                    original: candidate.url, disposition: disposition, removeFromResults: removeFromResults
+                ))
             }
         }
-        return DuplicateTrashResult(moved: moved, issues: issues)
+        return DuplicateTrashResult(outcomes: outcomes)
     }
 
     private static func trash(
         _ candidate: DuplicateFile, keeping survivors: [DuplicateFile], dataHash: String,
-        using trashItem: (URL) throws -> URL
-    ) throws {
+        trashDirectory: (URL) -> URL?, using trashItem: (URL) throws -> URL?
+    ) throws -> DuplicateTrashOutcome.Disposition {
         let source = candidate.url
-        let name = source.lastPathComponent
         let parentURL = source.deletingLastPathComponent()
         let parent = try FileToolDisk.openDirectory(parentURL)
         defer { close(parent) }
         guard survivors.contains(where: isUnchangedSurvivor) else { throw DuplicateTrashError.noSurvivor }
 
-        // Use a private sibling directory on the same volume. If interrupted, the original
-        // filename is still visible inside the recovery folder beside its original location.
-        let recoveryName = "OpenToolbox Trash Review \(UUID().uuidString)"
-        let recoveryURL = parentURL.appending(path: recoveryName, directoryHint: .isDirectory)
-        let stagedURL = recoveryURL.appending(path: name, directoryHint: .notDirectory)
-        guard mkdirat(parent, recoveryName, 0o700) == 0 else { throw FileToolDisk.posixError(at: recoveryURL) }
-        let staging = openat(parent, recoveryName, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard staging >= 0 else { throw FileToolDisk.posixError(at: recoveryURL) }
-        defer { close(staging) }
-        var info = stat()
-        guard fstat(staging, &info) == 0 else { throw FileToolDisk.posixError(at: recoveryURL) }
-        let recoveryIdentity = FileIdentity(info)
-        defer {
-            if FileToolDisk.entry(recoveryName, in: parent).map(FileIdentity.init) == recoveryIdentity {
-                _ = unlinkat(parent, recoveryName, AT_REMOVEDIR)
-            }
-        }
-        guard info.st_uid == geteuid(), info.st_mode & 0o077 == 0 else {
-            throw FileToolError.changed(recoveryURL)
-        }
-        try clearInheritedACL(from: staging, at: recoveryURL)
-
-        guard FileToolDisk.entry(name, in: parent).flatMap(FileSnapshot.init) == candidate.snapshot else {
+        let fd = try FileToolDisk.openFile(source, matching: candidate.snapshot)
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        defer { try? handle.close() }
+        let hashes = try HashGenerator.hashFile(handle, algorithms: [.sha256]) { _ in }
+        guard hashes[.sha256] == dataHash,
+              try !FileToolDisk.hasResourceFork(fd, at: source) else {
             throw FileToolError.changed(source)
         }
-        try FileToolDisk.move(name, from: parent, to: staging, at: source)
-        guard let stagedEntry = FileToolDisk.entry(name, in: staging) else {
-            throw DuplicateTrashError.recoveryRequired(stagedURL)
+        guard survivors.contains(where: isUnchangedSurvivor) else { throw DuplicateTrashError.noSurvivor }
+        try FileToolDisk.checkDirectory(parent, at: parentURL)
+        guard FileToolDisk.snapshot(of: fd) == candidate.snapshot,
+              FileToolDisk.snapshot(at: source) == candidate.snapshot else {
+            throw FileToolError.changed(source)
         }
-        let stagedIdentity = FileIdentity(stagedEntry)
+
+        // Pass the original URL so Finder can use that location for Put Back.
+        let receipt: URL?
         do {
-            guard let stagedSnapshot = FileSnapshot(stagedEntry),
-                  stagedSnapshot.matchesAfterRename(candidate.snapshot) else {
-                throw FileToolError.changed(source)
-            }
-            let fd = try FileToolDisk.openFile(stagedURL, matching: stagedSnapshot)
-            let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-            defer { try? handle.close() }
-            let hashes = try HashGenerator.hashFile(handle, algorithms: [.sha256]) { _ in }
-            guard hashes[.sha256] == dataHash,
-                  try !FileToolDisk.hasResourceFork(fd, at: stagedURL),
-                  FileToolDisk.snapshot(of: fd) == stagedSnapshot else {
-                throw FileToolError.changed(source)
-            }
-            guard survivors.contains(where: isUnchangedSurvivor) else { throw DuplicateTrashError.noSurvivor }
-            guard FileToolDisk.snapshot(at: stagedURL) == stagedSnapshot else { throw FileToolError.changed(source) }
-            let receipt = try trashItem(stagedURL)
-            guard FileToolDisk.snapshot(at: FileToolDisk.canonicalParent(of: receipt))?.identity == stagedIdentity else {
-                throw DuplicateTrashError.unverifiedTrash
-            }
+            receipt = try trashItem(source)
         } catch {
-            // A failed Trash call can already have moved the file. Restore only an entry
-            // we can still identify in the private directory, and never overwrite an occupant.
-            if let entry = FileToolDisk.entry(name, in: staging) {
-                guard FileIdentity(entry) == stagedIdentity else {
-                    throw DuplicateTrashError.recoveryRequired(stagedURL)
-                }
-                do {
-                    try FileToolDisk.move(name, from: staging, to: parent, at: source)
-                } catch {
-                    throw DuplicateTrashError.recoveryRequired(stagedURL)
-                }
+            if candidate.isUnchanged() { return .skipped(reason: error.localizedDescription) }
+            return .uncertain(reason: coreLocalized("The Trash move reported an error: \(error.localizedDescription) Check Trash and scan again."))
+        }
+        let unverified = DuplicateTrashOutcome.Disposition.uncertain(
+            reason: coreLocalized("Could not verify the moved file. Check Trash and scan again.")
+        )
+        guard let receipt, receipt.isFileURL,
+              !["", "/", ".", ".."].contains(receipt.lastPathComponent) else { return unverified }
+        let recycled = FileToolDisk.canonicalParent(of: receipt)
+        let recycledParentURL = recycled.deletingLastPathComponent()
+        let recycledName = recycled.lastPathComponent
+        guard recycled.path != source.path,
+              let recycledParent = try? FileToolDisk.openDirectory(recycledParentURL) else { return unverified }
+        defer { close(recycledParent) }
+        guard let recycledInfo = FileToolDisk.entry(recycledName, in: recycledParent) else { return unverified }
+        let recycledIdentity = FileIdentity(recycledInfo)
+        if recycledIdentity == candidate.snapshot.identity {
+            guard FileToolDisk.snapshot(at: source)?.identity != recycledIdentity else { return unverified }
+            if FileSnapshot(recycledInfo)?.matchesAfterRename(candidate.snapshot) == true {
+                return .trashed(recycled)
             }
-            throw error
+        } else {
+            // A mismatched receipt can point at an unrelated file, even inside Trash.
+            // Only use it for recovery if it came from the system Trash directory and
+            // we can still locate the reviewed inode alongside its original path.
+            guard let trashURL = trashDirectory(parentURL),
+                  let recycledParentIdentity = FileToolDisk.identity(of: recycledParent),
+                  FileToolDisk.directoryIdentity(at: FileToolDisk.canonicalDirectory(trashURL)) == recycledParentIdentity,
+                  let parentIdentity = FileToolDisk.identity(of: parent),
+                  parentIdentity != recycledParentIdentity,
+                  let actual = FileToolDisk.pathOfSingleLink(at: fd),
+                  actual.path != source.path,
+                  FileToolDisk.directoryIdentity(at: actual.deletingLastPathComponent()) == parentIdentity,
+                  FileToolDisk.entry(source.lastPathComponent, in: parent).map(FileIdentity.init)
+                    != candidate.snapshot.identity,
+                  FileToolDisk.snapshot(at: actual)?.identity == candidate.snapshot.identity else { return unverified }
+        }
+
+        do {
+            let destination = try restore(
+                recycled, from: recycledParent, matching: recycledIdentity,
+                to: parent, original: source
+            )
+            let reason = destination.path == source.path
+                ? coreLocalized("The file changed during the move. Scan again before moving it to Trash.")
+                : coreLocalized("The original name was taken. Scan again before moving the restored file to Trash.")
+            return .restored(to: destination, reason: reason)
+        } catch {
+            return .uncertain(reason: coreLocalized("Could not verify recovery from “\(recycled.path)”. Check the original folder and Trash, then scan again."))
         }
     }
 
-    private static func clearInheritedACL(from directory: Int32, at url: URL) throws {
-        // An inherited ACL can grant access even when the directory was created with mode 0700.
-        guard let inherited = acl_get_fd(directory) else {
-            if errno == ENOENT || errno == ENOTSUP { return }
-            throw FileToolDisk.posixError(at: url)
+    private static func restore(
+        _ recycled: URL, from trash: Int32, matching identity: FileIdentity,
+        to parent: Int32, original: URL
+    ) throws -> URL {
+        let parentURL = original.deletingLastPathComponent()
+        try FileToolDisk.checkDirectory(parent, at: parentURL)
+        let destination: URL
+        do {
+            try FileToolDisk.restore(recycled, from: trash, matching: identity, to: parent, at: original)
+            destination = original
+        } catch let error as NSError where error.domain == NSPOSIXErrorDomain && error.code == Int(EEXIST) {
+            // Keep the fallback under the filename length limit even if the original name was at the limit.
+            let extensionSuffix = original.pathExtension
+            let shortExtension = extensionSuffix.utf8.count <= 32 && !extensionSuffix.isEmpty ? ".\(extensionSuffix)" : ""
+            let recoveredName = "OpenToolbox Recovered \(UUID().uuidString)\(shortExtension)"
+            destination = parentURL.appending(path: recoveredName, directoryHint: .inferFromPath)
+            try FileToolDisk.checkDirectory(parent, at: parentURL)
+            try FileToolDisk.restore(recycled, from: trash, matching: identity, to: parent, at: destination)
         }
-        defer { _ = acl_free(UnsafeMutableRawPointer(inherited)) }
-        guard let empty = acl_init(0) else { throw FileToolDisk.posixError(at: url) }
-        defer { _ = acl_free(UnsafeMutableRawPointer(empty)) }
-        guard acl_set_fd(directory, empty) == 0 else { throw FileToolDisk.posixError(at: url) }
+        try FileToolDisk.checkDirectory(parent, at: parentURL)
+        guard FileToolDisk.entry(destination.lastPathComponent, in: parent).map(FileIdentity.init) == identity else {
+            throw FileToolError.changed(destination)
+        }
+        return destination
     }
 
     private static func isUnchangedSurvivor(_ file: DuplicateFile) -> Bool {
@@ -139,17 +187,8 @@ extension DuplicateScanner {
 
 private enum DuplicateTrashError: LocalizedError {
     case noSurvivor
-    case recoveryRequired(URL)
-    case unverifiedTrash
 
     var errorDescription: String? {
-        switch self {
-        case .noSurvivor:
-            coreLocalized("No unchanged, unselected copy remains. Scan again before moving this file to Trash.")
-        case .recoveryRequired(let url):
-            coreLocalized("Could not restore the staged file automatically. Check “\(url.path)”.")
-        case .unverifiedTrash:
-            coreLocalized("Could not verify the moved file in Trash. Check Trash and scan again.")
-        }
+        coreLocalized("No unchanged, unselected copy remains. Scan again before moving this file to Trash.")
     }
 }

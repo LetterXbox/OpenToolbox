@@ -44,11 +44,22 @@ public enum HashGenerator {
     ) throws -> [HashAlgorithm: String] {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
+        return try hashFile(handle, algorithms: algorithms, chunkSize: chunkSize) { _ in }
+    }
+
+    /// Hashes an already opened file, letting callers validate its identity and cancel between chunks.
+    static func hashFile(
+        _ handle: FileHandle,
+        algorithms: [HashAlgorithm],
+        chunkSize: Int = 1 << 20,
+        didHash: (Int) throws -> Void
+    ) throws -> [HashAlgorithm: String] {
         var hashers = algorithms.map(StreamingHasher.init)
         while let chunk = try handle.read(upToCount: chunkSize), !chunk.isEmpty {
             for index in hashers.indices {
                 hashers[index].update(chunk)
             }
+            try didHash(chunk.count)
         }
         var result: [HashAlgorithm: String] = [:]
         for (algorithm, hasher) in zip(algorithms, hashers) {

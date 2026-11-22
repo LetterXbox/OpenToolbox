@@ -56,6 +56,8 @@ public enum SummarizerError: Error, Equatable, LocalizedError {
 public enum Summarizer {
     /// Characters per request, well inside the model's context window for any script.
     static let chunkLimit = 2_400
+    /// Long texts are condensed in rounds; a text that doesn't shrink stops after this many.
+    static let maximumRounds = 4
 
     public static var availability: SummarizerAvailability {
         guard #available(macOS 26, *) else { return .needsNewerMacOS }
@@ -77,16 +79,19 @@ public enum Summarizer {
         }
         do {
             var pieces = DocumentText.chunks(trimmed, limit: chunkLimit)
-            while pieces.count > 1 {
+            var rounds = 0
+            while pieces.count > 1, rounds < maximumRounds {
                 var notes: [String] = []
                 for piece in pieces {
                     try Task.checkCancellation()
                     notes.append(try await respond(to: piece, instruction: "Write the key points in a few sentences."))
                 }
                 pieces = DocumentText.chunks(notes.joined(separator: "\n\n"), limit: chunkLimit)
+                rounds += 1
             }
             try Task.checkCancellation()
-            return try await respond(to: pieces.first ?? trimmed, instruction: style.instruction)
+            let notes = pieces.joined(separator: "\n\n")
+            return try await respond(to: String(notes.prefix(chunkLimit)), instruction: style.instruction)
         } catch let error as CancellationError {
             throw error
         } catch {

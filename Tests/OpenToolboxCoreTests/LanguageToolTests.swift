@@ -14,7 +14,7 @@ struct DocumentTextTests {
         let chunks = DocumentText.chunks(text, limit: 200)
         #expect(chunks.allSatisfy { $0.count <= 200 })
         #expect(chunks.joined(separator: " ").contains("Short one."))
-        let words = chunks.joined(separator: " ").split(separator: " ").filter { $0 == "gamma." }
+        let words = chunks.joined(separator: " ").split(whereSeparator: \.isWhitespace).filter { $0 == "gamma." }
         #expect(words.count == 60)
     }
 

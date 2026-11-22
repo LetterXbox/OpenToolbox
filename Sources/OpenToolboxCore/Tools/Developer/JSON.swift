@@ -81,7 +81,6 @@ public struct JSONParser {
 
     private let bytes: [UInt8]
     private var index = 0
-    private var depth = 0
 
     private init(_ text: String) {
         bytes = Array(text.utf8)
@@ -91,7 +90,7 @@ public struct JSONParser {
         var parser = JSONParser(text)
         parser.skipWhitespace()
         guard parser.index < parser.bytes.count else { throw parser.error(.emptyInput) }
-        let value = try parser.parseValue()
+        let value = try parser.parseDocument()
         parser.skipWhitespace()
         guard parser.index == parser.bytes.count else { throw parser.error(.trailingData) }
         return value
@@ -99,69 +98,108 @@ public struct JSONParser {
 
     // MARK: Values
 
-    private mutating func parseValue() throws -> JSONValue {
-        guard index < bytes.count else { throw error(.unexpectedEnd) }
-        switch bytes[index] {
-        case UInt8(ascii: "{"): return try parseObject()
-        case UInt8(ascii: "["): return try parseArray()
-        case UInt8(ascii: "\""): return .string(try parseString())
-        case UInt8(ascii: "t"): try expectLiteral("true"); return .bool(true)
-        case UInt8(ascii: "f"): try expectLiteral("false"); return .bool(false)
-        case UInt8(ascii: "n"): try expectLiteral("null"); return .null
-        case UInt8(ascii: "-"), UInt8(ascii: "0")...UInt8(ascii: "9"): return try parseNumber()
-        default: throw unexpectedCharacterError()
-        }
+    /// An open container while parsing. The parser keeps these on an explicit
+    /// stack instead of recursing, so deep documents cannot overflow small
+    /// thread stacks (background tasks get 512 KB).
+    private enum Container {
+        case array([JSONValue])
+        case object([JSONMember], key: String)
     }
 
-    private mutating func parseObject() throws -> JSONValue {
-        try enterContainer()
-        defer { depth -= 1 }
-        index += 1  // {
-        var members: [JSONMember] = []
-        skipWhitespace()
-        if peek() == UInt8(ascii: "}") {
-            index += 1
-            return .object(members)
-        }
+    private mutating func parseDocument() throws -> JSONValue {
+        var stack: [Container] = []
+
         while true {
+            // Parse one value, or open a container and continue with its first child.
             skipWhitespace()
-            guard peek() == UInt8(ascii: "\"") else { throw unexpectedCharacterError() }
-            let key = try parseString()
-            skipWhitespace()
-            guard peek() == UInt8(ascii: ":") else { throw unexpectedCharacterError() }
-            index += 1
-            skipWhitespace()
-            let value = try parseValue()
-            members.append(JSONMember(key: key, value: value))
-            skipWhitespace()
-            switch peek() {
-            case UInt8(ascii: ","): index += 1
-            case UInt8(ascii: "}"): index += 1; return .object(members)
-            default: throw unexpectedCharacterError()
+            guard index < bytes.count else { throw error(.unexpectedEnd) }
+            var value: JSONValue
+            switch bytes[index] {
+            case UInt8(ascii: "{"):
+                index += 1
+                skipWhitespace()
+                if peek() == UInt8(ascii: "}") {
+                    index += 1
+                    value = .object([])
+                } else {
+                    guard stack.count < Self.maximumDepth else { throw error(.nestingTooDeep) }
+                    stack.append(.object([], key: try parseObjectKey()))
+                    continue
+                }
+            case UInt8(ascii: "["):
+                index += 1
+                skipWhitespace()
+                if peek() == UInt8(ascii: "]") {
+                    index += 1
+                    value = .array([])
+                } else {
+                    guard stack.count < Self.maximumDepth else { throw error(.nestingTooDeep) }
+                    stack.append(.array([]))
+                    continue
+                }
+            case UInt8(ascii: "\""):
+                value = .string(try parseString())
+            case UInt8(ascii: "t"):
+                try expectLiteral("true")
+                value = .bool(true)
+            case UInt8(ascii: "f"):
+                try expectLiteral("false")
+                value = .bool(false)
+            case UInt8(ascii: "n"):
+                try expectLiteral("null")
+                value = .null
+            case UInt8(ascii: "-"), UInt8(ascii: "0")...UInt8(ascii: "9"):
+                value = try parseNumber()
+            default:
+                throw unexpectedCharacterError()
+            }
+
+            // Attach the finished value to its parent, closing containers as they end.
+            while true {
+                guard let parent = stack.popLast() else { return value }
+                skipWhitespace()
+                switch parent {
+                case .array(var elements):
+                    elements.append(value)
+                    switch peek() {
+                    case UInt8(ascii: ","):
+                        index += 1
+                        stack.append(.array(elements))
+                    case UInt8(ascii: "]"):
+                        index += 1
+                        value = .array(elements)
+                        continue
+                    default:
+                        throw unexpectedCharacterError()
+                    }
+                case .object(var members, let key):
+                    members.append(JSONMember(key: key, value: value))
+                    switch peek() {
+                    case UInt8(ascii: ","):
+                        index += 1
+                        skipWhitespace()
+                        stack.append(.object(members, key: try parseObjectKey()))
+                    case UInt8(ascii: "}"):
+                        index += 1
+                        value = .object(members)
+                        continue
+                    default:
+                        throw unexpectedCharacterError()
+                    }
+                }
+                break  // A new sibling value follows.
             }
         }
     }
 
-    private mutating func parseArray() throws -> JSONValue {
-        try enterContainer()
-        defer { depth -= 1 }
-        index += 1  // [
-        var elements: [JSONValue] = []
+    /// Parses `"key"` and the following `:`.
+    private mutating func parseObjectKey() throws -> String {
+        guard peek() == UInt8(ascii: "\"") else { throw unexpectedCharacterError() }
+        let key = try parseString()
         skipWhitespace()
-        if peek() == UInt8(ascii: "]") {
-            index += 1
-            return .array(elements)
-        }
-        while true {
-            skipWhitespace()
-            elements.append(try parseValue())
-            skipWhitespace()
-            switch peek() {
-            case UInt8(ascii: ","): index += 1
-            case UInt8(ascii: "]"): index += 1; return .array(elements)
-            default: throw unexpectedCharacterError()
-            }
-        }
+        guard peek() == UInt8(ascii: ":") else { throw unexpectedCharacterError() }
+        index += 1
+        return key
     }
 
     private mutating func parseString() throws -> String {
@@ -270,11 +308,6 @@ public struct JSONParser {
 
     // MARK: Helpers
 
-    private mutating func enterContainer() throws {
-        depth += 1
-        if depth > Self.maximumDepth { throw error(.nestingTooDeep) }
-    }
-
     private mutating func expectLiteral(_ literal: String) throws {
         for expected in literal.utf8 {
             guard index < bytes.count else { throw error(.unexpectedEnd) }
@@ -351,55 +384,73 @@ public enum JSONFormatter {
     }
 
     /// Serializes `value`; `indent == nil` produces the most compact form.
+    /// Uses an explicit work stack rather than recursion so deep documents are stack-safe.
     public static func serialize(_ value: JSONValue, indent: JSONIndent?, sortKeys: Bool = false) -> String {
-        var output = ""
-        write(value, into: &output, indent: indent?.unit, level: 0, sortKeys: sortKeys)
-        return output
-    }
-
-    private static func write(_ value: JSONValue, into output: inout String, indent: String?, level: Int, sortKeys: Bool)
-    {
-        switch value {
-        case .null: output += "null"
-        case .bool(let flag): output += flag ? "true" : "false"
-        case .number(let lexeme): output += lexeme
-        case .string(let string): writeString(string, into: &output)
-        case .array(let elements):
-            guard !elements.isEmpty else {
-                output += "[]"
-                return
-            }
-            output += "["
-            for (position, element) in elements.enumerated() {
-                if position > 0 { output += "," }
-                newline(into: &output, indent: indent, level: level + 1)
-                write(element, into: &output, indent: indent, level: level + 1, sortKeys: sortKeys)
-            }
-            newline(into: &output, indent: indent, level: level)
-            output += "]"
-        case .object(let members):
-            guard !members.isEmpty else {
-                output += "{}"
-                return
-            }
-            let ordered = sortKeys ? members.sorted { $0.key < $1.key } : members
-            output += "{"
-            for (position, member) in ordered.enumerated() {
-                if position > 0 { output += "," }
-                newline(into: &output, indent: indent, level: level + 1)
-                writeString(member.key, into: &output)
-                output += indent == nil ? ":" : ": "
-                write(member.value, into: &output, indent: indent, level: level + 1, sortKeys: sortKeys)
-            }
-            newline(into: &output, indent: indent, level: level)
-            output += "}"
+        enum Work {
+            case value(JSONValue, level: Int)
+            case key(String)
+            case literal(String)
+            case newline(level: Int)
         }
-    }
 
-    private static func newline(into output: inout String, indent: String?, level: Int) {
-        guard let indent else { return }
-        output += "\n"
-        output += String(repeating: indent, count: level)
+        let unit = indent?.unit
+        var output = ""
+        var work: [Work] = [.value(value, level: 0)]
+
+        while let item = work.popLast() {
+            switch item {
+            case .literal(let text):
+                output += text
+            case .key(let key):
+                writeString(key, into: &output)
+                output += unit == nil ? ":" : ": "
+            case .newline(let level):
+                if let unit {
+                    output += "\n"
+                    output += String(repeating: unit, count: level)
+                }
+            case .value(let value, let level):
+                switch value {
+                case .null: output += "null"
+                case .bool(let flag): output += flag ? "true" : "false"
+                case .number(let lexeme): output += lexeme
+                case .string(let string): writeString(string, into: &output)
+                case .array(let elements):
+                    guard !elements.isEmpty else {
+                        output += "[]"
+                        continue
+                    }
+                    output += "["
+                    var children: [Work] = []
+                    for (position, element) in elements.enumerated() {
+                        if position > 0 { children.append(.literal(",")) }
+                        children.append(.newline(level: level + 1))
+                        children.append(.value(element, level: level + 1))
+                    }
+                    children.append(.newline(level: level))
+                    children.append(.literal("]"))
+                    work.append(contentsOf: children.reversed())
+                case .object(let members):
+                    guard !members.isEmpty else {
+                        output += "{}"
+                        continue
+                    }
+                    let ordered = sortKeys ? members.sorted { $0.key < $1.key } : members
+                    output += "{"
+                    var children: [Work] = []
+                    for (position, member) in ordered.enumerated() {
+                        if position > 0 { children.append(.literal(",")) }
+                        children.append(.newline(level: level + 1))
+                        children.append(.key(member.key))
+                        children.append(.value(member.value, level: level + 1))
+                    }
+                    children.append(.newline(level: level))
+                    children.append(.literal("}"))
+                    work.append(contentsOf: children.reversed())
+                }
+            }
+        }
+        return output
     }
 
     static func writeString(_ string: String, into output: inout String) {

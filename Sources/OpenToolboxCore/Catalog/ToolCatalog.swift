@@ -58,31 +58,31 @@ public enum ToolCatalog {
         ToolDescriptor(
             id: "dev.diff", category: .developer,
             title: "Diff Checker", summary: "Compare two texts line by line.",
-            symbolName: "arrow.left.arrow.right", keywords: ["diff", "compare"], availability: .planned),
+            symbolName: "arrow.left.arrow.right", keywords: ["diff", "compare"]),
         ToolDescriptor(
             id: "dev.regex", category: .developer,
             title: "Regex Tester", summary: "Test regular expressions against sample text.",
-            symbolName: "asterisk", keywords: ["regex", "regexp", "pattern", "match"], availability: .planned),
+            symbolName: "asterisk", keywords: ["regex", "regexp", "pattern", "match"]),
         ToolDescriptor(
             id: "dev.clean-links", category: .developer,
             title: "Clean Links", summary: "Strip tracking parameters from URLs.",
-            symbolName: "link", keywords: ["url", "utm", "tracking", "link"], availability: .planned),
+            symbolName: "link", keywords: ["url", "utm", "tracking", "link"]),
         ToolDescriptor(
             id: "dev.unicode", category: .developer,
             title: "Unicode Inspector", summary: "Inspect code points, names, and encodings of characters.",
-            symbolName: "character", keywords: ["unicode", "utf8", "codepoint", "emoji"], availability: .planned),
+            symbolName: "character", keywords: ["unicode", "utf8", "codepoint", "emoji"]),
         ToolDescriptor(
             id: "dev.lorem", category: .developer,
             title: "Lorem Ipsum", summary: "Generate placeholder text.",
-            symbolName: "text.alignleft", keywords: ["lorem", "placeholder", "dummy"], availability: .planned),
+            symbolName: "text.alignleft", keywords: ["lorem", "placeholder", "dummy"]),
         ToolDescriptor(
             id: "dev.password", category: .developer,
-            title: "Password Generator", summary: "Generate strong random passwords and passphrases.",
-            symbolName: "lock.shield", keywords: ["password", "passphrase", "random"], availability: .planned),
+            title: "Password Generator", summary: "Generate strong random passwords.",
+            symbolName: "lock.shield", keywords: ["password", "passphrase", "random"]),
         ToolDescriptor(
             id: "dev.csv-json", category: .developer,
             title: "CSV ↔ JSON", summary: "Convert between CSV and JSON.",
-            symbolName: "tablecells", keywords: ["csv", "json", "table", "convert"], availability: .planned),
+            symbolName: "tablecells", keywords: ["csv", "json", "table", "convert"]),
     ]
 
     // MARK: - Text & Files
@@ -91,12 +91,11 @@ public enum ToolCatalog {
         ToolDescriptor(
             id: "text.word-counter", category: .textAndFiles,
             title: "Word Counter", summary: "Count words, characters, sentences, and lines.",
-            symbolName: "textformat.123", keywords: ["count", "words", "characters"], availability: .planned),
+            symbolName: "textformat.123", keywords: ["count", "words", "characters"]),
         ToolDescriptor(
             id: "text.case-converter", category: .textAndFiles,
             title: "Case Converter", summary: "Convert text between camelCase, snake_case, Title Case, and more.",
-            symbolName: "textformat", keywords: ["case", "camel", "snake", "kebab", "upper", "lower"],
-            availability: .planned),
+            symbolName: "textformat", keywords: ["case", "camel", "snake", "kebab", "upper", "lower"]),
         ToolDescriptor(
             id: "text.qr-code", category: .textAndFiles,
             title: "QR Code", summary: "Generate and read QR codes.",

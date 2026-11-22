@@ -67,7 +67,35 @@ struct JSONTests {
     @Test func rejectsExcessiveNesting() {
         let deep = String(repeating: "[", count: JSONParser.maximumDepth + 1)
             + String(repeating: "]", count: JSONParser.maximumDepth + 1)
-        #expect(throws: JSONParseError.self) { try JSONParser.parse(deep) }
+        do {
+            _ = try JSONParser.parse(deep)
+            Issue.record("Expected nestingTooDeep")
+        } catch let error as JSONParseError {
+            #expect(error.reason == .nestingTooDeep)
+        } catch {
+            Issue.record("Unexpected error \(error)")
+        }
+    }
+
+    /// Runs on a Swift Testing worker thread (small stack), so this also proves the
+    /// parser and serializer do not recurse per nesting level.
+    @Test func maximumNestingIsStackSafe() throws {
+        let depth = JSONParser.maximumDepth
+        let arrays = String(repeating: "[", count: depth) + "1" + String(repeating: "]", count: depth)
+        #expect(try JSONFormatter.minified(arrays) == arrays)
+        let pretty = try JSONFormatter.prettyPrinted(arrays)
+        #expect(try JSONFormatter.minified(pretty) == arrays)
+
+        let objects = String(repeating: #"{"k":"#, count: depth) + "null" + String(repeating: "}", count: depth)
+        #expect(try JSONFormatter.minified(objects) == objects)
+    }
+
+    @Test func mixedContainers() throws {
+        let input = #"{"a":[{"b":[]},{"c":{"d":[1,{"e":2}]}}],"f":{}}"#
+        #expect(try JSONFormatter.minified(input) == input)
+        #expect(throws: JSONParseError.self) { try JSONParser.parse(#"{"a":[1}"#) }
+        #expect(throws: JSONParseError.self) { try JSONParser.parse(#"{"a":1,}"#) }
+        #expect(throws: JSONParseError.self) { try JSONParser.parse(#"[1 2]"#) }
     }
 }
 

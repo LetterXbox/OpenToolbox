@@ -10,9 +10,9 @@ public enum CPUArchitecture: String, Codable, Sendable, CaseIterable {
 
     public static var current: CPUArchitecture {
         #if arch(arm64)
-            .arm64
+            return .arm64
         #else
-            .x86_64
+            return .x86_64
         #endif
     }
 }

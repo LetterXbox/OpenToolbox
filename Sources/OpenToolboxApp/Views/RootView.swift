@@ -137,6 +137,15 @@ enum ToolViewRegistry {
         case "dev.uuid": UUIDGeneratorView(tool: tool)
         case "dev.jwt": JWTDecoderView(tool: tool)
         case "dev.timestamp": TimestampConverterView(tool: tool)
+        case "dev.diff": DiffCheckerView(tool: tool)
+        case "dev.regex": RegexTesterView(tool: tool)
+        case "dev.clean-links": CleanLinksView(tool: tool)
+        case "dev.unicode": UnicodeInspectorView(tool: tool)
+        case "dev.lorem": LoremIpsumView(tool: tool)
+        case "dev.password": PasswordGeneratorView(tool: tool)
+        case "dev.csv-json": CSVJSONView(tool: tool)
+        case "text.word-counter": WordCounterView(tool: tool)
+        case "text.case-converter": CaseConverterView(tool: tool)
         default:
             ContentUnavailableView(
                 tool.localizedTitle,

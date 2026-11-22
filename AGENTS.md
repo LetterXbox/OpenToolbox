@@ -24,5 +24,8 @@ Open-source, pure native macOS (Swift / SwiftUI, macOS 15+) utility suite with m
 
 - **Coding & orchestration (`.49` Linux server):** `/home/debian/Workspaces/OpenToolbox`
 - **Native macOS build & test (`mac-mini` linked environment):** `/Users/pliu-bot/OpenToolbox`
-- Both checkouts share `origin` (`LetterXbox/OpenToolbox`, private GitHub repo until release).
-- Do not attempt to compile SwiftUI/macOS targets on `.49`. Commit and push branches to `origin`, then delegate `swift build`, `swift test`, `xcodebuild`, or macOS GUI verification to the linked `mac-mini` environment (which runs Codex/Pi).
+  - `environmentId`: `5dd812dc-fcc5-481d-aaa6-180df7038894`
+  - `projectId`: `mcp:599cc2a8-ce62-4c99-9558-0d2fb21c7ab6`
+  - Authenticated with a **read-only** repo-scoped GitHub deploy key (`core.sshCommand` configured repo-locally for `/Users/pliu-bot/.ssh/id_ed25519_opentoolbox`). Do not attempt to push from `mac-mini`.
+- Both checkouts share `origin` (`git@github.com:LetterXbox/OpenToolbox.git`, private GitHub repo until release).
+- Do not attempt to compile SwiftUI/macOS targets on `.49`. Commit and push branches to `origin`, then delegate `git fetch` + `swift build` / `swift test` / `xcodebuild` to `mac-mini`'s `OpenToolbox` project (which runs Codex/Pi; use Codex `gpt-6.2-sol` Low for routine build/test runs).

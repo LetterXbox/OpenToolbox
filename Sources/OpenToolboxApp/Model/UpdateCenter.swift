@@ -20,6 +20,7 @@ final class UpdateCenter {
     private(set) var lastChecked: Date?
     private var lastAutomaticAttempt: Date?
     private var isAutomaticTransaction = false
+    private var hasLaunchNotice = false
     var windowRequest = 0
 
     var checksAutomatically: Bool {
@@ -54,6 +55,7 @@ final class UpdateCenter {
     private static let installsKey = "UpdatesInstallAutomatically"
     private static let lastCheckedKey = "UpdatesLastChecked"
     private static let lastAutomaticAttemptKey = "UpdatesLastAutomaticAttempt"
+    private static let installNoticeKey = "UpdatesInstallNotice"
     private static let interval: TimeInterval = 24 * 60 * 60
 
     init(defaults: UserDefaults = .standard, bundle: Bundle = .main) {
@@ -79,7 +81,19 @@ final class UpdateCenter {
         timer = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.checkIfDue() }
         }
-        checkIfDue()
+        if let notice = defaults.string(forKey: Self.installNoticeKey) {
+            defaults.removeObject(forKey: Self.installNoticeKey)
+            phase = .failed(L("The update could not be installed when OpenToolbox quit: \(notice)"))
+            hasLaunchNotice = true
+        } else {
+            checkIfDue()
+        }
+    }
+
+    /// Whether an install that failed when the app last quit should be reported now. Reports it once.
+    func takeLaunchNotice() -> Bool {
+        defer { hasLaunchNotice = false }
+        return hasLaunchNotice
     }
 
     var canCheck: Bool { currentVersion != nil }
@@ -95,7 +109,10 @@ final class UpdateCenter {
     /// Checks GitHub now. A user-initiated check reports its result in the Software Update window.
     func checkNow(userInitiated: Bool) {
         guard let currentVersion, !isBusy else { return }
-        if case .ready = phase { return }
+        if case .ready(let prepared) = phase {
+            if FileManager.default.fileExists(atPath: prepared.stagedApp.path) { return }
+            phase = .idle
+        }
         if !userInitiated { recordAutomaticAttempt() }
         phase = .checking
         task = Task {
@@ -151,7 +168,11 @@ final class UpdateCenter {
         task?.cancel()
         guard case .ready(let prepared) = phase, let installer, !isAutomaticTransaction || installsAutomatically
         else { return }
-        try? installer.install(prepared)
+        do {
+            try installer.install(prepared)
+        } catch {
+            defaults.set(error.localizedDescription, forKey: Self.installNoticeKey)
+        }
         phase = .idle
     }
 
@@ -207,7 +228,7 @@ final class UpdateCenter {
             guard let installed = await launchRecord?.value ?? nil else {
                 phase = automatic
                     ? .available(update)
-                    : .failed(L("OpenToolbox couldn't read its own app bundle, so it can't install updates. Download the update from GitHub instead."))
+                    : .failed(L("OpenToolbox couldn't read its own app bundle when it opened. Quit and reopen OpenToolbox, then try again."))
                 return
             }
             do {

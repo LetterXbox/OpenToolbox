@@ -98,10 +98,17 @@ public struct UpdateInstaller: Sendable {
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> PreparedUpdate {
         guard Self.isUnchanged(installed) else { throw Self.replacedError }
-        let work = workRoot.appending(path: UUID().uuidString, directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-        guard let lease = Self.lease(work) else {
-            try? FileManager.default.removeItem(at: work)
+        let id = UUID().uuidString
+        let pending = workRoot.appending(path: ".pending-\(id)", directoryHint: .isDirectory)
+        let work = workRoot.appending(path: id, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: pending, withIntermediateDirectories: true)
+        guard let lease = Self.lease(pending) else {
+            try? FileManager.default.removeItem(at: pending)
+            throw UpdateError.installFailed(coreLocalized("The update's work folder could not be locked."))
+        }
+        guard rename(pending.path, work.path) == 0 else {
+            close(lease)
+            try? FileManager.default.removeItem(at: pending)
             throw UpdateError.installFailed(coreLocalized("The update's work folder could not be locked."))
         }
         var keepWork = false
@@ -163,12 +170,19 @@ public struct UpdateInstaller: Sendable {
         else { throw UpdateError.installFailed(coreLocalized("The prepared update is missing or has changed.")) }
         guard Self.isUnchanged(installed) else { throw Self.replacedError }
 
-        guard renamex_np(staged.path, installed.url.path, UInt32(RENAME_SWAP)) == 0 else {
+        let swapping = staged.deletingLastPathComponent().appending(
+            path: "OpenToolbox (update in progress \(UUID().uuidString.prefix(8))).app", directoryHint: .isDirectory)
+        guard renamex_np(staged.path, swapping.path, UInt32(RENAME_EXCL)) == 0 else {
             throw UpdateError.installFailed(String(cString: strerror(errno)))
         }
-        let displaced = InstalledApp(url: staged, identity: installed.identity, contents: installed.contents)
-        guard Self.isUnchanged(displaced) else { throw Self.restore(staged, to: installed.url) }
-        try? FileManager.default.removeItem(at: staged)
+        guard renamex_np(swapping.path, installed.url.path, UInt32(RENAME_SWAP)) == 0 else {
+            let reason = String(cString: strerror(errno))
+            _ = renamex_np(swapping.path, staged.path, UInt32(RENAME_EXCL))
+            throw UpdateError.installFailed(reason)
+        }
+        let displaced = InstalledApp(url: swapping, identity: installed.identity, contents: installed.contents)
+        guard Self.isUnchanged(displaced) else { throw Self.restore(swapping, to: installed.url, staged: staged) }
+        try? FileManager.default.removeItem(at: swapping)
     }
 
     /// Removes the staged copy of an update that will not be installed.
@@ -294,14 +308,15 @@ public struct UpdateInstaller: Sendable {
         fileIdentity(at: app.url) == app.identity && contents(of: app.url) == app.contents
     }
 
-    /// Puts back an item that turned out to be at the installed path during the swap.
-    private static func restore(_ displaced: URL, to original: URL) -> UpdateError {
-        if renamex_np(displaced.path, original.path, UInt32(RENAME_SWAP)) == 0 { return replacedError }
-        let aside = displaced.deletingLastPathComponent()
-            .appending(path: "OpenToolbox (moved aside \(UUID().uuidString.prefix(8))).app", directoryHint: .isDirectory)
-        let location = renamex_np(displaced.path, aside.path, UInt32(RENAME_EXCL)) == 0 ? aside : displaced
-        return .installFailed(coreLocalized(
-            "Another app was found in place of OpenToolbox during the update. It was kept at \(location.path)."))
+    /// Puts back an item that turned out to be at the installed path during the swap. `displaced` has a name
+    /// that startup cleanup never removes, so the item stays there if it can't be put back.
+    private static func restore(_ displaced: URL, to original: URL, staged: URL) -> UpdateError {
+        guard renamex_np(displaced.path, original.path, UInt32(RENAME_SWAP)) == 0 else {
+            return .installFailed(coreLocalized(
+                "Another app was found in place of OpenToolbox during the update. It was kept at \(displaced.path)."))
+        }
+        _ = renamex_np(displaced.path, staged.path, UInt32(RENAME_EXCL))
+        return replacedError
     }
 
     private func isVerifiedCopy(_ prepared: PreparedUpdate) -> Bool {
@@ -342,7 +357,8 @@ public struct UpdateInstaller: Sendable {
         return await Task.detached {
             for arguments in [["detach"], ["detach", "-force"]] {
                 guard let images = await Self.attachedImages(commands) else { return false }
-                guard let device = images.first(where: { $0.path == target })?.device else { return true }
+                guard let image = images.first(where: { $0.path == target }) else { return true }
+                guard let device = image.device else { return false }
                 _ = try? await commands.run("/usr/bin/hdiutil", arguments: arguments + [device])
             }
             guard let images = await Self.attachedImages(commands) else { return false }
@@ -358,9 +374,10 @@ public struct UpdateInstaller: Sendable {
 
     private static func attachedImages(_ commands: UpdateCommandRunner) async -> [AttachedImage]? {
         guard let output = try? await commands.run("/usr/bin/hdiutil", arguments: ["info", "-plist"]),
-            let plist = try? PropertyListSerialization.propertyList(from: output, format: nil) as? [String: Any]
+            let plist = try? PropertyListSerialization.propertyList(from: output, format: nil) as? [String: Any],
+            let images = plist["images"] as? [[String: Any]]
         else { return nil }
-        return ((plist["images"] as? [[String: Any]]) ?? []).compactMap { image in
+        return images.compactMap { image in
             guard let path = image["image-path"] as? String else { return nil }
             let entities = (image["system-entities"] as? [[String: Any]]) ?? []
             return AttachedImage(

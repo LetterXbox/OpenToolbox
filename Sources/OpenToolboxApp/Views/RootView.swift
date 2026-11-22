@@ -33,6 +33,9 @@ struct RootView: View {
         .onChange(of: updates.windowRequest) {
             openWindow(id: SoftwareUpdateWindow.id)
         }
+        .onAppear {
+            if updates.takeLaunchNotice() { openWindow(id: SoftwareUpdateWindow.id) }
+        }
     }
 }
 

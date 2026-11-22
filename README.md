@@ -94,7 +94,7 @@ Choose **OpenToolbox → Check for Updates…** to look for a newer release on G
 
 An update is installed only after the disk image matches the SHA-256 checksum GitHub publishes for it, and the app inside has the OpenToolbox bundle identifier, the release's version number, and a valid code signature. It replaces the app when you restart or quit. Before downloading and again just before replacing the app, OpenToolbox checks that the app on disk is still the copy that was opened, and that the downloaded copy is still the one it verified, down to every architecture in its executable. If OpenToolbox can't write to its own folder, or macOS is running it from a temporary location, the update window links to the release page instead.
 
-Turning on the automatic check checks right away. Turning off automatic download and install stops an automatic download that is under way and discards an automatically downloaded update that hasn't been installed yet.
+If an update can't be installed when you quit, OpenToolbox keeps the current version and tells you why the next time you open it. Turning on the automatic check checks right away. Turning off automatic download and install stops an automatic download that is under way and discards an automatically downloaded update that hasn't been installed yet.
 
 ## Known Limitations
 
@@ -102,7 +102,6 @@ Turning on the automatic check checks right away. Turning off automatic download
 - Switching to another tool resets the one you left and stops a running Network Speed Test.
 - With two OpenToolbox windows open, `⌘K` shows Quick Open in both.
 - Releases are ad-hoc signed, so an update's code signature proves the app is intact but not who built it. Trust in an update rests on the GitHub release it comes from.
-- If an update can't be installed when you quit (for example, because the app's folder has become read-only), OpenToolbox quits on the current version without saying so. Choose **Check for Updates…** to try again.
 - If you run two copies of OpenToolbox from the same folder at once, the one you open later removes an update the other has downloaded and is waiting to install. Choose **Check for Updates…** in the first copy to download it again.
 
 ## Building from Source

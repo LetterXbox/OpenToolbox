@@ -233,7 +233,9 @@ struct UpdateTests {
             let foreign = try Self.makeApp(in: root, version: "0.2.0",
                 name: "\(UpdateInstaller.stagedPrefix)\(UUID().uuidString).app", identifier: "com.example.other")
             let lookalike = try Self.makeApp(in: root, version: "0.2.0", name: "\(UpdateInstaller.stagedPrefix)notes.app")
+            let swapping = try Self.makeApp(in: root, version: "0.1.0", name: "OpenToolbox (update in progress 1A2B3C4D).app")
             UpdateInstaller(workRoot: root.appending(path: "work")).removeLeftovers(next: installed)
+            #expect(FileManager.default.fileExists(atPath: swapping.path))
             #expect(!FileManager.default.fileExists(atPath: leftover.path))
             #expect(FileManager.default.fileExists(atPath: foreign.path))
             #expect(FileManager.default.fileExists(atPath: lookalike.path))
@@ -347,6 +349,31 @@ struct UpdateTests {
             #expect(FileManager.default.fileExists(atPath: unrelated.path))
             let info = try await runner.run("/usr/bin/hdiutil", arguments: ["info"])
             #expect(!String(decoding: info, as: UTF8.self).contains(interrupted.lastPathComponent))
+        }
+    }
+
+    @Test func staleWorkIsKeptWhenAttachedImagesAreUnknown() async throws {
+        try await withTemporaryDirectory { root in
+            let work = root.appending(path: "work", directoryHint: .isDirectory)
+            let interrupted = work.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: interrupted, withIntermediateDirectories: true)
+            let image = interrupted.appending(path: "update.dmg").path
+            let pending = work.appending(path: ".pending-\(UUID().uuidString)", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: pending, withIntermediateDirectories: true)
+
+            let inventories: [[String: Any]] = [
+                [:],
+                ["images": [["image-path": image]]],
+                ["images": [["image-path": image, "system-entities": [["mount-point": interrupted.path]]]]],
+            ]
+            for inventory in inventories {
+                let commands = FixedInventory(inventory)
+                await UpdateInstaller(commands: commands, workRoot: work).removeStaleWork()
+                #expect(FileManager.default.fileExists(atPath: interrupted.path))
+            }
+            await UpdateInstaller(commands: FixedInventory(["images": []]), workRoot: work).removeStaleWork()
+            #expect(!FileManager.default.fileExists(atPath: interrupted.path))
+            #expect(FileManager.default.fileExists(atPath: pending.path))
         }
     }
 
@@ -536,5 +563,18 @@ final class CancelAfterAttach: UpdateCommandRunner, @unchecked Sendable {
             lock.withLock { target }?.cancel()
         }
         return output
+    }
+}
+
+final class FixedInventory: UpdateCommandRunner, @unchecked Sendable {
+    private let inventory: Data
+
+    init(_ inventory: [String: Any]) {
+        self.inventory = try! PropertyListSerialization.data(fromPropertyList: inventory, format: .xml, options: 0)
+    }
+
+    func run(_ executable: String, arguments: [String]) async throws -> Data {
+        guard arguments == ["info", "-plist"] else { throw UpdateError.installFailed("not expected") }
+        return inventory
     }
 }

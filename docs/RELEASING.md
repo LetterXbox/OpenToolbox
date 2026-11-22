@@ -9,9 +9,9 @@ At the start of work on each new release, look at the latest releases of both ap
 - Toolbox for Mac (<https://mactoolbox.app/>), using its public changelog or release notes
 - DevToys (<https://devtoys.app/>), using its public release notes
 
-For each one, note the version and date of its latest release and list the features it added since our last check. Then decide what, if anything, joins our roadmap. Record the result in the release PR description, for example: "Checked Toolbox for Mac 3.4 (2026-11-01) and DevToys 2.1 (2026-10-15); added X to Phase 2."
+For each one, note the version and date of its latest release and list the features it added since our last check. Then decide what, if anything, to plan for. The roadmap is kept privately by the maintainers, so record the decisions there. The release PR description only names what was checked, for example: "Checked Toolbox for Mac 3.4 (2026-11-01) and DevToys 2.1 (2026-10-15)."
 
-Clean-room boundary (see `AGENTS.md`):
+Clean-room boundary (see "Contributing" in the README):
 - **Allowed:** reading public release notes, changelogs and feature lists to learn which features exist.
 - **Not allowed:**
   - downloading, installing or decompiling the apps;

@@ -106,7 +106,7 @@ public enum EngineCatalog {
     public static let ffmpegID: EngineID = "ffmpeg"
     public static let ytDlpID: EngineID = "yt-dlp"
 
-    /// Phase 2 engines. Builds are not pinned yet, so they are listed but not installable.
+    /// Engines without a pinned build are listed but not installable.
     /// Each pinned build must come with a published SHA-256 before it is added here.
     public static let all: [EngineManifest] = [
         EngineManifest(

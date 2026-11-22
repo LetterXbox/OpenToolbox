@@ -1,53 +1,102 @@
+<img src="Design/AppIcon/AppIcon-1024.png" width="128" alt="OpenToolbox app icon">
+
 # OpenToolbox
 
-An open-source, pure native macOS (Swift / SwiftUI) utility suite designed around privacy, speed, and **on-demand downloads**.
+**Everyday developer, text, image, PDF, and Mac utilities in one native macOS app.**
 
-## Core Principles
+OpenToolbox brings common small utilities together in a single Swift and SwiftUI app for macOS 15+. Everything built in runs locally on your Mac using Apple frameworks, and file tools always write to a dedicated output folder so your originals stay untouched.
 
-- **100% Native macOS (macOS 15+):** Built with Swift and SwiftUI using Apple's native frameworks (Vision, PDFKit, AVFoundation, ScreenCaptureKit, ImageIO, Translation, etc.)—no Electron, no web wrappers.
-- **On-Demand Engines & Models:** The core app stays lightweight. Pure-Swift and Apple-framework tools work out of the box (0 MB extra). Heavy external tools and AI models (`ffmpeg`, `yt-dlp`, `whisper.cpp`, `7zz`, etc.) are downloaded only when you explicitly choose to install a tool that needs them, verified with SHA-256 checksums, shared across tools, and removable with one click.
-- **Private & Offline by Default:** No accounts, no telemetry, no file uploads. Files are processed locally on your Mac.
-- **Originals Untouched:** File-processing tools write new outputs into a dedicated folder rather than overwriting source files.
+## Why OpenToolbox
 
-## Roadmap
+- **Native macOS (macOS 15+):** Written in Swift and SwiftUI using Apple frameworks (such as Vision, PDFKit, and ImageIO)—no Electron, no web wrappers, and universal builds for Apple silicon and Intel.
+- **Private and offline by default:** No accounts, no telemetry, and no file uploads. Files are processed locally on your Mac. OpenToolbox only accesses the network for actions you explicitly start (downloading on-demand engines or running Network Speed Test).
+- **Originals untouched:** File-processing tools write new, collision-safe files into a dedicated output folder (`<output folder>/<yyyy-MM-dd>/<tool>/`) instead of overwriting your source files.
+- **On-demand engines:** Built-in Swift and Apple-framework tools work out of the box with zero extra downloads. External CLI engines are never bundled into the app; when available, they are downloaded only when you choose to install them, verified by SHA-256, shared across tools that need them, and removable with one click.
 
-### Phase 1 (v0.1 — Core Shell & Built-In Tools)
-- [x] Native SwiftUI app shell, sidebar, and quick command palette (`⌘K`)
-- [x] Modular Tool & Engine Manager (enable/disable per tool, on-demand engine install/uninstall, disk usage, SHA-256 verification)
-- [x] Developer utilities (JSON, Base64/Hex, Hash, UUID, JWT, Timestamp, Diff, Regex, Clean Links, Unicode Inspector, Lorem Ipsum, Password Generator, CSV ↔ JSON)
-- [x] Text & File utilities (Word Counter, Case Converter, QR Code, Batch Rename, Find Duplicates)
-- [x] Built-in Image & PDF tools via Apple frameworks (Convert/Resize/Rotate, Strip EXIF, Remove Background, Blur Faces, Merge/Split/Extract/Rotate PDF pages, Images ↔ PDF, OCR)
-- [ ] Visual PDF page organizer (drag to reorder, delete pages)
-- [x] Core Mac utilities (Keep Awake, Battery Health, Network Speed Test, Eject All Disks, Quarantine Helper, Hidden Settings)
-- [ ] Release `.app` bundle built from an Xcode application target. Releases are unsigned for now: on first launch, approve the app in System Settings → Privacy & Security → **Open Anyway**.
-- [ ] Later, optional: Developer ID signing and notarization
+## What It Does
 
-### v0.1.1 — Fixes
-- [x] Find Duplicates → Move to Trash: confirm the move without reading `~/.Trash`, which macOS privacy protection blocks (v0.1 reported every move as unverified)
-- [x] Find Duplicates → Move to Trash: report "uncertain" instead of auto-recovering when the trashed item cannot be proven to be the reviewed file (two coincident races; see `docs/reviews/resolver-trash-recovery.md`)
-- [x] PDF exports: pin the calendar as well as the date per run, so a time-zone change mid-export cannot split outputs across two dated folders
-- [x] Packaged app records the SDK it was built with, so macOS 26 and later draw it in the current design instead of a compatibility mode that showed a line across the scrolled sidebar
+Navigate tools from the sidebar, jump anywhere with **Quick Open (`⌘K`)**, and use the **Engine Manager** to enable or disable tools and manage on-demand engines.
 
-### v0.2 — App Experience & More Built-In Tools
-- [ ] Tools keep their state when you switch to another tool, so long jobs such as a speed test keep running, with progress and a notification when they finish
-- [ ] Menu bar mode, a global hotkey for Quick Open, and launch at login
-- [ ] Watermark images and PDFs (text or image, position, opacity)
-- [ ] Disk Speed Test (sequential read/write on a chosen volume)
+### Developer
 
-### Phase 2 — On-Demand Media & Archive Engines
-- [ ] `ffmpeg` engine — manifest schema and Engine Manager UI ready; verified builds not pinned yet (Video/Audio Compress, Convert, Trim, Mute, Extract Audio, Video to GIF, Media Info)
-- [ ] `yt-dlp` engine — manifest schema and Engine Manager UI ready; verified builds not pinned yet (Download Video)
-- [ ] `7zz` / `unar` engine (ZIP, 7z, RAR, TAR archives)
+| Tool | Description |
+| --- | --- |
+| **JSON Formatter** | Format, minify, and validate JSON. |
+| **Base64 / Hex** | Encode and decode Base64, Base64URL, and hexadecimal. |
+| **Hash Generator** | Compute MD5, SHA-1, and SHA-2 digests of text or files. |
+| **UUID Generator** | Generate and inspect UUID v4 and v7 identifiers. |
+| **JWT Decoder** | Decode JSON Web Token headers and claims. |
+| **Timestamp Converter** | Convert Unix timestamps and ISO 8601 dates. |
+| **Diff Checker** | Compare two texts line by line. |
+| **Regex Tester** | Test regular expressions against sample text. |
+| **Clean Links** | Strip tracking parameters from URLs. |
+| **Unicode Inspector** | Inspect code points, names, and encodings of characters. |
+| **Lorem Ipsum** | Generate placeholder text. |
+| **Password Generator** | Generate strong random passwords. |
+| **CSV ↔ JSON** | Convert between CSV and JSON. |
 
-### Phase 3 — Advanced Editors, System Tools & Local AI
-- [ ] Screenshot capture, annotation, beautify, and screen recording
-- [ ] PDF signing, form filling, true redaction, and document conversion
-- [ ] Local transcription (`whisper.cpp`), audio cleanup, and optional CLI / MCP integration
-- [ ] System utilities (Clipboard History, Storage Explorer, App Uninstaller, Display Control, Mouse Fixes)
+### Text & Files
 
-## Building
+| Tool | Description |
+| --- | --- |
+| **Word Counter** | Count words, characters, sentences, and lines. |
+| **Case Converter** | Convert text between `camelCase`, `snake_case`, Title Case, and more. |
+| **QR Code** | Generate and read QR codes. |
+| **Batch Rename** | Rename many files with patterns and previews. |
+| **Find Duplicates** | Find duplicate files by content. |
 
-Requires macOS 15+ and Xcode 16 or later (Swift 6 toolchain).
+### Images & PDF
+
+Powered by Apple frameworks (Vision, PDFKit, ImageIO):
+
+| Tool | Description |
+| --- | --- |
+| **Convert Images** | Convert, resize, and rotate images. |
+| **Strip EXIF** | Remove location and camera metadata from images. |
+| **Remove Background** | Lift subjects from photos on-device. |
+| **Blur Faces** | Detect and blur faces on-device. |
+| **Extract Text (OCR)** | Recognize text in images and PDFs on-device. |
+| **Organize PDFs** | Merge, split, extract, reorder, and rotate PDF pages. |
+| **Images ↔ PDF** | Combine images into a PDF or export pages as images. |
+
+### Mac Utilities
+
+| Tool | Description |
+| --- | --- |
+| **Keep Awake** | Prevent your Mac from sleeping for a while. |
+| **Battery Health** | Show battery cycle count, capacity, and condition. |
+| **Network Speed Test** | Measure network quality with Apple's `networkQuality`. |
+| **Eject All Disks** | Eject every external and disk-image volume. |
+| **Quarantine Helper** | Inspect and clear the quarantine flag on downloaded files. |
+| **Hidden Settings** | Toggle documented hidden macOS preferences. |
+
+### Media
+
+- **Convert Video & Audio** (`ffmpeg`) and **Download Video** (`yt-dlp`) are listed in the app as **"Coming soon"** until verified engine builds are pinned.
+
+## Install
+
+Requires **macOS 15 or later** (universal build for Apple silicon and Intel).
+
+1. Download the latest `OpenToolbox-<version>-macOS-universal.dmg` from [Releases](https://github.com/LetterXbox/OpenToolbox/releases) and open it.
+2. Drag **OpenToolbox** into the **Applications** folder.
+3. Open **OpenToolbox** from Applications. Because releases are not signed with an Apple Developer ID or notarized, macOS blocks the first launch: click **Done**, then go to **System Settings → Privacy & Security** and click **Open Anyway**. You only need to do this once per version.
+
+Each release lists the disk image's SHA-256 checksum so you can verify your download:
+
+```sh
+shasum -a 256 OpenToolbox-<version>-macOS-universal.dmg
+```
+
+## Known Limitations
+
+- Releases are not notarized (see [Install](#install)).
+- Switching to another tool resets the one you left and stops a running Network Speed Test.
+- With two OpenToolbox windows open, `⌘K` shows Quick Open in both.
+
+## Building from Source
+
+Requires **macOS 15 or later** and **Xcode 16 or later** (Swift 6 toolchain).
 
 ```sh
 swift build                 # build the core library and the app
@@ -57,7 +106,13 @@ swift run OpenToolbox       # launch the app from the command line
 
 You can also open `Package.swift` in Xcode and run the `OpenToolbox` scheme.
 
-To build a universal, ad-hoc signed `OpenToolbox.app` and its release disk image (`.dmg`), run `scripts/package-app.sh <version>` on a Mac. The output goes to `.build/release-app/dist/`.
+To package a universal, ad-hoc signed `OpenToolbox.app` and its release disk image (`.dmg` and `.sha256`), run on a Mac:
+
+```sh
+scripts/package-app.sh <version>
+```
+
+Output is written to `.build/release-app/dist/`.
 
 ### Layout
 
@@ -69,9 +124,16 @@ To build a universal, ad-hoc signed `OpenToolbox.app` and its release disk image
 
 ### Conventions
 
-- **Strings:** every user-facing literal goes through `L("…")` (app) or `coreLocalized("…")` (core) so it lands in the `Localizable.xcstrings` catalogs. English is the source language.
-- **Engines:** manifests ship with the app (`EngineCatalog`). Each artifact is pinned per CPU architecture with an HTTPS URL, byte size, and SHA-256. Installs download to a staging folder, verify size and checksum, then move into `~/Library/Application Support/OpenToolbox/engines/<id>/` in one rename. Engines that have no verified pinned build yet are listed as "Coming soon" and cannot be installed.
-- **Outputs:** file tools write to `<output folder>/<yyyy-MM-dd>/<tool>/` with collision-safe names, and never overwrite the source file.
+- **Strings:** Every user-facing literal goes through `L("…")` (app) or `coreLocalized("…")` (core) so it lands in the `Localizable.xcstrings` catalogs. English is the source language.
+- **Engines:** Manifests ship with the app (`EngineCatalog`). Each artifact is pinned per CPU architecture with an HTTPS URL, byte size, and SHA-256 checksum. Installs download to a staging folder, verify size and checksum, then move into `~/Library/Application Support/OpenToolbox/engines/<id>/` in one rename. Engines without a verified pinned build yet are listed as "Coming soon" and cannot be installed.
+- **Outputs:** File tools write to `<output folder>/<yyyy-MM-dd>/<tool>/` with collision-safe names and never overwrite the source file.
+
+## Contributing
+
+Issues and pull requests are welcome. Two rules apply to every contribution:
+
+- **Clean room:** Write everything from scratch using public Apple frameworks, standard open-source tools, and original code, UI text, and assets. Never download, decompile, or copy binaries, source code, icons, or UI text from other utility apps, including the ones named below.
+- **Engines stay separate:** External CLI engines are downloaded on demand as separate binaries, never bundled. Only free and open-source engines are used (for example, `unar` or `7zz` instead of the non-free `unrar`).
 
 ## Inspiration & Credits
 

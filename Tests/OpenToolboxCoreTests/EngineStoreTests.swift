@@ -531,7 +531,6 @@ struct EngineStoreTests {
         #expect(engineIDs.count == EngineCatalog.all.count)
         for engine in EngineCatalog.all {
             #expect(EngineManifest.isValidID(engine.id))
-            // Phase 2 engines stay non-installable until a verified build is pinned.
             if engine.version == nil { #expect(engine.artifact() == nil) }
             for artifact in engine.artifacts {
                 #expect(artifact.url.scheme == "https")

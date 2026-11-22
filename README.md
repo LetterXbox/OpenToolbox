@@ -9,7 +9,7 @@ OpenToolbox brings common small utilities together in a single Swift and SwiftUI
 ## Why OpenToolbox
 
 - **Native macOS (macOS 15+):** Written in Swift and SwiftUI using Apple frameworks (such as Vision, PDFKit, and ImageIO)—no Electron, no web wrappers, and universal builds for Apple silicon and Intel.
-- **Private and offline by default:** No accounts, no telemetry, and no file uploads. Files are processed locally on your Mac. OpenToolbox only accesses the network for actions you explicitly start (downloading on-demand engines or running Network Speed Test).
+- **Private and offline by default:** No accounts, no telemetry, and no file uploads. Files are processed locally on your Mac. OpenToolbox only accesses the network for actions you explicitly start (downloading on-demand engines, running Network Speed Test, or checking for updates), plus a once-a-day update check if you turn it on.
 - **Originals untouched:** File-processing tools write new, collision-safe files into a dedicated output folder (`<output folder>/<yyyy-MM-dd>/<tool>/`) instead of overwriting your source files.
 - **On-demand engines:** Built-in Swift and Apple-framework tools work out of the box with zero extra downloads. External CLI engines are never bundled into the app; when available, they are downloaded only when you choose to install them, verified by SHA-256, shared across tools that need them, and removable with one click.
 
@@ -88,11 +88,18 @@ Each release lists the disk image's SHA-256 checksum so you can verify your down
 shasum -a 256 OpenToolbox-<version>-macOS-universal.dmg
 ```
 
+## Updates
+
+Choose **OpenToolbox → Check for Updates…** to look for a newer release on GitHub. In **Settings → Updates** you can turn on a daily automatic check and, optionally, automatic download and install. Both are off by default.
+
+An update is installed only after the disk image matches the SHA-256 checksum GitHub publishes for it, and the app inside has the OpenToolbox bundle identifier, the release's version number, and a valid code signature. It replaces the app when you restart or quit. If OpenToolbox can't write to its own folder, or macOS is running it from a temporary location, the update window links to the release page instead.
+
 ## Known Limitations
 
 - Releases are not notarized (see [Install](#install)).
 - Switching to another tool resets the one you left and stops a running Network Speed Test.
 - With two OpenToolbox windows open, `⌘K` shows Quick Open in both.
+- Releases are ad-hoc signed, so an update's code signature proves the app is intact but not who built it. Trust in an update rests on the GitHub release it comes from.
 
 ## Building from Source
 

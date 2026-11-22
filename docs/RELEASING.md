@@ -41,7 +41,13 @@ The script builds a universal, ad-hoc signed `OpenToolbox.app`. Its output is in
 
 ## 4. Publish
 
-Create a GitHub release tagged `v<version>` on the release commit. Attach only the disk image, and put its SHA-256 in the notes. The notes must include:
+Create a GitHub release tagged `v<version>` on the release commit. Attach only the disk image, and put its SHA-256 in the notes.
+
+The in-app updater depends on these exact conventions:
+- The tag is `v<version>`, where `<version>` is dotted numbers only (for example `v0.2.0`). It must equal the app's `CFBundleShortVersionString`.
+- The asset is named `OpenToolbox-<version>-macOS-universal.dmg`, and `OpenToolbox.app` sits at the top level of the disk image.
+- Only the latest full release is offered. Drafts and pre-releases are never offered.
+- The updater checks the asset's SHA-256 digest from the GitHub API, so the uploaded file must be the exact disk image from step 3. The notes must include:
 - the "Open Anyway" install steps (releases are not notarized);
 - what was and wasn't tested;
 - the known limitations.

@@ -11,9 +11,13 @@ struct OpenToolboxApp: App {
         WindowGroup(L("OpenToolbox")) {
             RootView()
                 .environment(model)
+                .environment(appDelegate.updates)
         }
         .defaultSize(width: 1080, height: 720)
         .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesButton(updates: appDelegate.updates)
+            }
             SidebarCommands()
             CommandMenu(L("Tools")) {
                 Button(L("Quick Open…")) {
@@ -30,19 +34,34 @@ struct OpenToolboxApp: App {
             }
         }
 
+        Window(L("Software Update"), id: SoftwareUpdateWindow.id) {
+            SoftwareUpdateView()
+                .environment(appDelegate.updates)
+        }
+        .windowResizability(.contentSize)
+        .restorationBehavior(.disabled)
+
         Settings {
             SettingsView()
                 .environment(model)
+                .environment(appDelegate.updates)
         }
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    let updates = UpdateCenter()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Needed when launched as a bare SwiftPM executable (`swift run`) so the
         // app gets a Dock icon, a menu bar, and keyboard focus.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        updates.installOnQuit()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

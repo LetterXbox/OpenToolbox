@@ -47,7 +47,7 @@ final class UpdateCenter {
     private let appURL: URL
     private let installer: UpdateInstaller?
     private var task: Task<Void, Never>?
-    private var cleanup: Task<Void, Never>?
+    private var launchRecord: Task<InstalledApp?, Never>?
     private var timer: Timer?
 
     private static let checksKey = "UpdatesCheckAutomatically"
@@ -69,7 +69,13 @@ final class UpdateCenter {
 
         if unsupportedReason == nil { installer?.removeLeftovers(next: appURL) }
         let installer = installer
-        cleanup = Task { await installer?.removeStaleWork() }
+        let appURL = appURL
+        let supported = unsupportedReason == nil
+        launchRecord = Task.detached {
+            let installed = supported ? UpdateInstaller.installedApp(at: appURL) : nil
+            await installer?.removeStaleWork()
+            return installed
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.checkIfDue() }
         }
@@ -196,12 +202,16 @@ final class UpdateCenter {
         guard canInstall, let installer, !isBusy else { return }
         isAutomaticTransaction = automatic
         phase = .downloading(update, 0)
-        let appURL = appURL
-        let cleanup = cleanup
+        let launchRecord = launchRecord
         task = Task {
-            await cleanup?.value
+            guard let installed = await launchRecord?.value ?? nil else {
+                phase = automatic
+                    ? .available(update)
+                    : .failed(L("OpenToolbox couldn't read its own app bundle, so it can't install updates. Download the update from GitHub instead."))
+                return
+            }
             do {
-                let prepared = try await installer.prepare(update, replacing: appURL) { fraction in
+                let prepared = try await installer.prepare(update, replacing: installed) { fraction in
                     Task { @MainActor in self.showProgress(fraction, for: update) }
                 }
                 guard !Task.isCancelled else {

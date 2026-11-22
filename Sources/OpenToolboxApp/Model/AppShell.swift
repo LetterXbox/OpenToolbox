@@ -101,7 +101,7 @@ final class LoginItem {
 /// Posts a notification when a tool finishes work the user isn't looking at.
 @MainActor
 final class ToolNotifier: NSObject, UNUserNotificationCenterDelegate {
-    var onOpen: ((ToolID) -> Void)?
+    var onOpen: ((ToolID, UUID?) -> Void)?
 
     private var center: UNUserNotificationCenter? {
         isRunningFromAppBundle ? .current() : nil
@@ -111,12 +111,12 @@ final class ToolNotifier: NSObject, UNUserNotificationCenterDelegate {
         center?.delegate = self
     }
 
-    func announce(_ tool: ToolDescriptor) {
+    func announce(_ tool: ToolDescriptor, window: UUID) {
         guard let center else { return }
         let content = UNMutableNotificationContent()
         content.title = L("\(tool.localizedTitle) finished")
         content.body = L("Open OpenToolbox to see the result.")
-        content.userInfo = ["tool": tool.id]
+        content.userInfo = ["tool": tool.id, "window": window.uuidString]
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         Task {
             guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true else { return }
@@ -135,9 +135,11 @@ final class ToolNotifier: NSObject, UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let tool = response.notification.request.content.userInfo["tool"] as? String
+        let info = response.notification.request.content.userInfo
+        let tool = info["tool"] as? String
+        let window = (info["window"] as? String).flatMap(UUID.init(uuidString:))
         Task { @MainActor in
-            if let tool { self.onOpen?(tool) }
+            if let tool { self.onOpen?(tool, window) }
         }
         completionHandler()
     }

@@ -30,8 +30,16 @@ struct MenuBarMenu: View {
 
         Divider()
 
-        if case .ready(let prepared) = updates.phase {
+        switch updates.phase {
+        case .ready(let prepared):
             Button(L("Restart to Update to \(prepared.version.description)")) { updates.restartNow() }
+        case .available(let update):
+            Button(L("OpenToolbox \(update.version.description) Is Available…")) {
+                NSApp.activate()
+                openWindow(id: SoftwareUpdateWindow.id)
+            }
+        default:
+            EmptyView()
         }
         Button(L("Check for Updates…")) {
             NSApp.activate()
@@ -49,5 +57,20 @@ struct MenuBarMenu: View {
 
         Button(L("Quit OpenToolbox")) { NSApp.terminate(nil) }
             .keyboardShortcut("q", modifiers: .command)
+    }
+}
+
+/// The menu bar icon. It also opens the Software Update window when an automatic check asks for
+/// it while no OpenToolbox window is open.
+struct MenuBarLabel: View {
+    let updates: UpdateCenter
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Image(systemName: "wrench.and.screwdriver")
+            .accessibilityLabel(L("OpenToolbox"))
+            .onChange(of: updates.windowRequest) {
+                if updates.takeWindowRequest() { openWindow(id: SoftwareUpdateWindow.id) }
+            }
     }
 }

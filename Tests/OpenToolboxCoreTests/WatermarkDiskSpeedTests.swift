@@ -153,7 +153,78 @@ struct WatermarkTests {
     }
 }
 
-@Suite("Disk speed test")
+extension WatermarkTests {
+    @Test func positionedMarksStayInsideTheMargins() {
+        let canvas = CGSize(width: 800, height: 400)
+        let inset = 400 * Watermark.margin
+        let room = CGRect(x: inset, y: inset, width: 800 - 2 * inset, height: 400 - 2 * inset)
+        for diagonal in [false, true] {
+            for position in WatermarkOptions.Position.allCases where position != .tiled {
+                let options = WatermarkOptions(
+                    content: .text("x"), position: position, relativeWidth: 0.6, isDiagonal: diagonal)
+                let rects = Watermark.layout(aspectRatio: 0.5, canvas: canvas, options: options)
+                #expect(rects.count == 1)
+                let rect = rects[0]
+                let footprint = diagonal ? (rect.width + rect.height) / 2.squareRoot() : 0
+                let box = diagonal
+                    ? CGRect(x: rect.midX - footprint / 2, y: rect.midY - footprint / 2, width: footprint, height: footprint)
+                    : rect
+                #expect(room.insetBy(dx: -0.01, dy: -0.01).contains(box), "\(position) diagonal \(diagonal): \(box)")
+                #expect(abs(rect.width / rect.height - 0.5) < 0.001)
+            }
+        }
+    }
+
+    @Test(arguments: [
+        (0, CGRect(x: 100, y: 150, width: 300, height: 200)),
+        (90, CGRect(x: 150, y: 200, width: 200, height: 300)),
+        (180, CGRect(x: 200, y: 450, width: 300, height: 200)),
+        (270, CGRect(x: 450, y: 100, width: 200, height: 300)),
+    ])
+    func cropBoxesFollowThePageRotation(rotation: Int, expected: CGRect) {
+        let media = CGRect(x: 0, y: 0, width: 600, height: 800)
+        let crop = CGRect(x: 100, y: 150, width: 300, height: 200)
+        #expect(Watermark.outputRect(crop, media: media, rotation: rotation) == expected)
+    }
+
+    @Test func pdfCopiesKeepTheCropBox() async throws {
+        try await withTemporaryDirectory { directory in
+            let document = PDFTools.makePDF(fromImages: [try makeTestImage(width: 600, height: 800)])
+            let page = try #require(document.page(at: 0))
+            let media = page.bounds(for: .mediaBox)
+            let crop = CGRect(x: media.minX + 100, y: media.minY + 150, width: 300, height: 200)
+            page.setBounds(crop, for: .cropBox)
+            page.rotation = 90
+            let source = directory.appending(path: "cropped.pdf")
+            try PDFTools.write(document, to: source)
+            let output = OutputDirectory(baseDirectory: directory.appending(path: "out"))
+            let result = try Watermark.apply(
+                toPDF: source, options: WatermarkOptions(content: .text("COPY")), output: output, tool: "image.watermark")
+
+            let marked = try #require(try PDFTools.open(result).page(at: 0))
+            let markedCrop = marked.bounds(for: .cropBox)
+            #expect(abs(markedCrop.width - 200) < 0.5 && abs(markedCrop.height - 300) < 0.5, "\(markedCrop)")
+            #expect(marked.rotation == 0)
+        }
+    }
+
+    @Test func multiFrameImagesAreRefused() async throws {
+        try await withTemporaryDirectory { directory in
+            let source = directory.appending(path: "pages.tiff")
+            let destination = try #require(CGImageDestinationCreateWithURL(source as CFURL, "public.tiff" as CFString, 2, nil))
+            CGImageDestinationAddImage(destination, try makeTestImage(width: 40, height: 40), nil)
+            CGImageDestinationAddImage(destination, try makeTestImage(width: 40, height: 40), nil)
+            #expect(CGImageDestinationFinalize(destination))
+            let output = OutputDirectory(baseDirectory: directory.appending(path: "out"))
+            #expect(throws: WatermarkError.multipleImages("pages.tiff")) {
+                try Watermark.apply(
+                    toImage: source, options: WatermarkOptions(content: .text("A")), output: output, tool: "image.watermark")
+            }
+        }
+    }
+}
+
+@Suite("Disk speed test", .serialized)
 struct DiskSpeedTests {
     private final class ProgressLog: @unchecked Sendable {
         private let lock = NSLock()
@@ -205,7 +276,43 @@ struct DiskSpeedTests {
             try DiskSpeedTest.checkSpace(needed: 100, available: 120, reserve: 50)
         }
         try DiskSpeedTest.checkSpace(needed: 100, available: 150, reserve: 50)
-        try DiskSpeedTest.checkSpace(needed: 100, available: nil, reserve: 50)
+        #expect(throws: DiskSpeedError.spaceUnknown("Test")) {
+            try DiskSpeedTest.checkSpace(needed: 100, available: nil, reserve: 50, volumeName: "Test")
+        }
+    }
+
+    @Test func onlyOneTestRunsAtATime() async throws {
+        try await withTemporaryDirectory { directory in
+            #expect(DiskSpeedTest.claim())
+            #expect(throws: DiskSpeedError.alreadyRunning) {
+                try DiskSpeedTest.run(in: directory, volumeName: "Test", bytes: 1024 * 1024, reserve: 0)
+            }
+            DiskSpeedTest.release()
+            let leftovers = try contents(of: directory)
+            #expect(leftovers.isEmpty)
+            _ = try DiskSpeedTest.run(in: directory, volumeName: "Test", bytes: 1024 * 1024, blockSize: 1024 * 1024, reserve: 0)
+        }
+    }
+
+    @Test func refusesADifferentVolumeThanTheOneChosen() async throws {
+        try await withTemporaryDirectory { directory in
+            #expect(throws: DiskSpeedError.volumeChanged("Test")) {
+                try DiskSpeedTest.run(
+                    in: directory, volumeName: "Test", expectedVolumeUUID: "00000000-0000-0000-0000-000000000000",
+                    bytes: 1024 * 1024, reserve: 0)
+            }
+        }
+    }
+
+    @Test func stopsWhenTheReserveWouldBeUsed() async throws {
+        try await withTemporaryDirectory { directory in
+            let available = try #require(DiskSpeedTest.availableBytes(at: directory))
+            #expect(throws: DiskSpeedError.self) {
+                try DiskSpeedTest.run(in: directory, volumeName: "Test", bytes: 1024 * 1024, reserve: available)
+            }
+            let leftovers = try contents(of: directory)
+            #expect(leftovers.isEmpty)
+        }
     }
 
     @Test func reportsAFolderItCannotWriteTo() async throws {

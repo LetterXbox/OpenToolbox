@@ -21,7 +21,17 @@ final class UpdateCenter {
     private var lastAutomaticAttempt: Date?
     private var isAutomaticTransaction = false
     private var hasLaunchNotice = false
-    var windowRequest = 0
+    /// Bumped when the Software Update window should open on its own. A request made while no
+    /// window is open stays pending until a scene takes it.
+    private(set) var windowRequest = 0 {
+        didSet { hasPendingWindowRequest = true }
+    }
+    private var hasPendingWindowRequest = false
+
+    func takeWindowRequest() -> Bool {
+        defer { hasPendingWindowRequest = false }
+        return hasPendingWindowRequest
+    }
 
     var checksAutomatically: Bool {
         didSet {

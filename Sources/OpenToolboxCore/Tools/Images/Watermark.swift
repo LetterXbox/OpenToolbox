@@ -1,16 +1,18 @@
 import CoreGraphics
 import CoreText
 import Foundation
+import ImageIO
 import PDFKit
 
 public enum WatermarkError: Error, Equatable, LocalizedError {
     case emptyText
-    case unsupportedFile(String)
+    case multipleImages(String)
 
     public var errorDescription: String? {
         switch self {
         case .emptyText: coreLocalized("Enter the watermark text.")
-        case .unsupportedFile(let name): coreLocalized("“\(name)” is not an image or a PDF.")
+        case .multipleImages(let name):
+            coreLocalized("“\(name)” holds several images or frames. Watermark supports single images and PDFs.")
         }
     }
 }
@@ -154,12 +156,6 @@ public enum Watermark {
             CTLineGetBoundsWithOptions(line(text, fontSize: fontSize, color: color), .useGlyphPathBounds)
         }
 
-        /// The size the mark is drawn at on a canvas of `canvas`.
-        func size(on canvas: CGSize, relativeWidth: Double) -> CGSize {
-            let width = canvas.width * min(max(relativeWidth, 0.02), 1)
-            return CGSize(width: width, height: width / max(aspectRatio, 0.0001))
-        }
-
         func draw(in context: CGContext, frame: CGRect, diagonal: Bool) {
             context.saveGState()
             defer { context.restoreGState() }
@@ -182,23 +178,49 @@ public enum Watermark {
         }
     }
 
-    static func draw(_ mark: Mark, on canvas: CGSize, in context: CGContext, options: WatermarkOptions) {
-        let size = mark.size(on: canvas, relativeWidth: options.relativeWidth)
+    /// The rectangle of each watermark copy before any diagonal turn. A positioned mark is scaled
+    /// down when needed so that it, turned if diagonal, fits inside the margins.
+    public static func layout(aspectRatio: CGFloat, canvas: CGSize, options: WatermarkOptions) -> [CGRect] {
+        let aspect = max(aspectRatio, 0.0001)
+        var width = canvas.width * min(max(options.relativeWidth, 0.02), 1)
+        var height = width / aspect
+        func footprint(_ width: CGFloat, _ height: CGFloat) -> CGSize {
+            guard options.isDiagonal else { return CGSize(width: width, height: height) }
+            let side = (width + height) / 2.squareRoot()
+            return CGSize(width: side, height: side)
+        }
+        if options.position != .tiled {
+            let inset = min(canvas.width, canvas.height) * margin
+            let room = CGSize(width: canvas.width - 2 * inset, height: canvas.height - 2 * inset)
+            let needed = footprint(width, height)
+            let scale = max(0, min(1, room.width / needed.width, room.height / needed.height))
+            width *= scale
+            height *= scale
+        }
+        return frames(markSize: footprint(width, height), canvas: canvas, position: options.position).map { box in
+            CGRect(x: box.midX - width / 2, y: box.midY - height / 2, width: width, height: height)
+        }
+    }
+
+    /// Draws the watermark over `area`, the visible part of the page or image.
+    static func draw(_ mark: Mark, over area: CGRect, in context: CGContext, options: WatermarkOptions) {
         context.saveGState()
+        context.translateBy(x: area.minX, y: area.minY)
         context.setAlpha(min(max(options.opacity, 0), 1))
-        for frame in frames(markSize: size, canvas: canvas, position: options.position) {
+        for frame in layout(aspectRatio: mark.aspectRatio, canvas: area.size, options: options) {
             mark.draw(in: context, frame: frame, diagonal: options.isDiagonal)
         }
         context.restoreGState()
     }
-
-    // MARK: Images
 
     /// Watermarks one image into the output folder, keeping its format and metadata.
     public static func apply(
         toImage source: URL, options: WatermarkOptions, output: OutputDirectory, tool: ToolID
     ) throws -> URL {
         let mark = try Mark(options.content, color: options.textColor)
+        if let imageSource = CGImageSourceCreateWithURL(source as CFURL, nil), CGImageSourceGetCount(imageSource) > 1 {
+            throw WatermarkError.multipleImages(source.lastPathComponent)
+        }
         let loaded = try ImageProcessor.loadImage(at: source)
         let format = ImageProcessor.resolvedFormat(nil, sourceType: loaded.type)
         let rendered = try render(loaded.image, mark: mark, options: options, opaque: !format.supportsAlpha)
@@ -222,14 +244,13 @@ public enum Watermark {
             context.fill(CGRect(origin: .zero, size: canvas))
         }
         context.draw(image, in: CGRect(origin: .zero, size: canvas))
-        draw(mark, on: canvas, in: context, options: options)
+        draw(mark, over: CGRect(origin: .zero, size: canvas), in: context, options: options)
         guard let result = context.makeImage() else { throw ImageProcessingError.renderFailed }
         return result
     }
 
-    // MARK: PDFs
-
-    /// Watermarks every page of a PDF into the output folder. Page content stays vector.
+    /// Watermarks every page of a PDF into the output folder. Page content stays vector, and each
+    /// page keeps its crop box, so the copy shows the same area as the original.
     public static func apply(
         toPDF source: URL, options: WatermarkOptions, output: OutputDirectory, tool: ToolID
     ) throws -> URL {
@@ -251,18 +272,38 @@ public enum Watermark {
         }
         for index in 0..<document.pageCount {
             guard let page = document.page(at: index) else { continue }
-            let bounds = page.bounds(for: .mediaBox)
-            let quarterTurn = page.rotation % 180 != 0
-            let canvas = CGSize(
-                width: quarterTurn ? bounds.height : bounds.width, height: quarterTurn ? bounds.width : bounds.height)
-            var box = CGRect(origin: .zero, size: canvas)
-            let pageInfo = [kCGPDFContextMediaBox: Data(bytes: &box, count: MemoryLayout<CGRect>.size)]
+            let media = page.bounds(for: .mediaBox)
+            let visible = page.bounds(for: .cropBox).intersection(media)
+            let rotation = ((page.rotation % 360) + 360) % 360
+            var mediaBox = outputRect(media, media: media, rotation: rotation)
+            var cropBox = outputRect(visible.isNull ? media : visible, media: media, rotation: rotation)
+            let pageInfo: [CFString: Any] = [
+                kCGPDFContextMediaBox: Data(bytes: &mediaBox, count: MemoryLayout<CGRect>.size),
+                kCGPDFContextCropBox: Data(bytes: &cropBox, count: MemoryLayout<CGRect>.size),
+            ]
             context.beginPDFPage(pageInfo as CFDictionary)
             // PDFKit applies the page's rotation and box origin when drawing.
             page.draw(with: .mediaBox, to: context)
-            draw(mark, on: canvas, in: context, options: options)
+            draw(mark, over: cropBox, in: context, options: options)
             context.endPDFPage()
         }
         context.closePDF()
+    }
+
+    /// Where a rectangle in a page's own space lands on the upright output page, whose media box
+    /// starts at the origin. `rotation` is the page's clockwise turn in degrees.
+    static func outputRect(_ rect: CGRect, media: CGRect, rotation: Int) -> CGRect {
+        let x0 = rect.minX - media.minX
+        let x1 = rect.maxX - media.minX
+        let y0 = rect.minY - media.minY
+        let y1 = rect.maxY - media.minY
+        let width = media.width
+        let height = media.height
+        switch rotation {
+        case 90: return CGRect(x: y0, y: width - x1, width: y1 - y0, height: x1 - x0)
+        case 180: return CGRect(x: width - x1, y: height - y1, width: x1 - x0, height: y1 - y0)
+        case 270: return CGRect(x: height - y1, y: x0, width: y1 - y0, height: x1 - x0)
+        default: return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+        }
     }
 }

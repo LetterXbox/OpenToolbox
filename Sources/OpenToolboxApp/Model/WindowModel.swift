@@ -8,6 +8,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class WindowModel {
+    let id = UUID()
     private(set) var selection: SidebarItem?
     var isCommandPaletteVisible = false
     /// Tools opened in this window, kept alive in that order so switching away keeps their state.
@@ -17,7 +18,7 @@ final class WindowModel {
     private(set) var finishedTools: Set<ToolID> = []
     @ObservationIgnored weak var window: NSWindow?
     /// Called when a tool finishes work while it isn't in front of the user.
-    @ObservationIgnored var onFinish: (ToolDescriptor) -> Void = { _ in }
+    @ObservationIgnored var onFinish: (ToolDescriptor, WindowModel) -> Void = { _, _ in }
 
     init(selection: SidebarItem? = .tool("dev.json-formatter")) {
         select(selection)
@@ -54,9 +55,14 @@ final class WindowModel {
             return
         }
         guard busyTools.remove(tool.id) != nil else { return }
-        let isShown = selection == .tool(tool.id)
-        if !isShown { finishedTools.insert(tool.id) }
-        if !(isShown && isInFront) { onFinish(tool) }
+        guard !(selection == .tool(tool.id) && isInFront) else { return }
+        finishedTools.insert(tool.id)
+        onFinish(tool, self)
+    }
+
+    /// Clears the finished mark of the tool now in front of the user.
+    func cameToFront() {
+        if case .tool(let id) = selection { finishedTools.remove(id) }
     }
 }
 

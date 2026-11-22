@@ -42,8 +42,7 @@ struct OpenToolboxApp: App {
                 .environment(model)
                 .environment(appDelegate.updates)
         } label: {
-            Image(systemName: "wrench.and.screwdriver")
-                .accessibilityLabel(L("OpenToolbox"))
+            MenuBarLabel(updates: appDelegate.updates)
         }
     }
 }

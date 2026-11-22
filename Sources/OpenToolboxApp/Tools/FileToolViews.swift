@@ -22,6 +22,7 @@ struct BatchRenameView: View {
     @State private var resultTitle = ""
     @State private var revision = 0
 
+    @State private var isWorkingHere = false
     private let session = FileToolSession.shared
 
     private enum Mode: Hashable { case copy, inPlace }
@@ -104,7 +105,7 @@ struct BatchRenameView: View {
         } message: {
             Text(L("This changes the names of the original files in their current folders."))
         }
-        .reportsActivity(session.isRenaming)
+        .reportsActivity(isWorkingHere)
     }
 
     private var filePreview: some View {
@@ -356,11 +357,13 @@ struct BatchRenameView: View {
         let plan = self.preview
         let copying = request.copyDirectory != nil
         session.isRenaming = true
+        isWorkingHere = true
         result = nil
         operationError = nil
         Task {
             defer {
                 session.isRenaming = false
+                isWorkingHere = false
                 revision += 1
             }
             do {
@@ -395,6 +398,7 @@ struct BatchRenameView: View {
         guard let journal = session.undoJournal, !session.isRenaming, !session.isRecycling else { return }
         let scopes = session.undoScopes
         session.isRenaming = true
+        isWorkingHere = true
         result = nil
         operationError = nil
         Task {
@@ -407,6 +411,7 @@ struct BatchRenameView: View {
             self.result = result
             revision += 1
             session.isRenaming = false
+            isWorkingHere = false
         }
     }
 }

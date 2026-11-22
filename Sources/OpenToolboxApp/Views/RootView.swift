@@ -42,11 +42,12 @@ struct RootView: View {
             Text(message)
         }
         .onChange(of: updates.windowRequest) {
-            openWindow(id: SoftwareUpdateWindow.id)
+            if updates.takeWindowRequest() { openWindow(id: SoftwareUpdateWindow.id) }
         }
         .onAppear {
             model.register(window) { [openWindow] in openWindow(id: MainWindow.id) }
-            if updates.takeLaunchNotice() { openWindow(id: SoftwareUpdateWindow.id) }
+            let notice = updates.takeLaunchNotice()
+            if updates.takeWindowRequest() || notice { openWindow(id: SoftwareUpdateWindow.id) }
         }
         .onDisappear { model.unregister(window) }
     }

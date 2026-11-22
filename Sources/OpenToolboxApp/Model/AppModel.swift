@@ -76,19 +76,24 @@ final class AppModel {
 
     /// Starts the parts that talk to the system once the app has finished launching.
     func start() {
-        notifier.onOpen = { [weak self] id in self?.show(.tool(id)) }
+        notifier.onOpen = { [weak self] tool, window in self?.reveal(tool, in: window) }
         notifier.start()
         loginItem.refresh()
         applyHotKey()
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.willCloseNotification] {
+            _ = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                let closing = name == NSWindow.willCloseNotification ? (note.object as AnyObject?).map(ObjectIdentifier.init) : nil
+                MainActor.assumeIsolated { self?.updateActivationPolicy(closing: closing) }
+            }
+        }
         updateActivationPolicy()
     }
 
-    // MARK: Windows
-
     func register(_ window: WindowModel, openWindow: @escaping () -> Void) {
         openMainWindow = openWindow
-        window.onFinish = { [weak self] tool in self?.notifier.announce(tool) }
+        window.onFinish = { [weak self] tool, window in self?.notifier.announce(tool, window: window.id) }
         windows[ObjectIdentifier(window)] = window
+        if case .tool(let id) = window.selection, !isActive(id) { window.close(id) }
         if activeWindow == nil { activeWindow = window }
         if let item = pendingItem {
             window.open(item)
@@ -104,11 +109,31 @@ final class AppModel {
     func unregister(_ window: WindowModel) {
         windows[ObjectIdentifier(window)] = nil
         if activeWindow === window { activeWindow = windows.values.first }
-        updateActivationPolicy()
+        updateActivationPolicy(closing: window.window.map(ObjectIdentifier.init))
     }
 
     func windowBecameKey(_ window: WindowModel) {
         activeWindow = window
+        window.cameToFront()
+    }
+
+    private func isActive(_ id: ToolID) -> Bool {
+        activeTools.contains { $0.id == id }
+    }
+
+    /// Shows a tool whose work finished, in the window it ran in when that window is still open.
+    private func reveal(_ id: ToolID, in windowID: UUID?) {
+        guard isActive(id) else { return showWindow() }
+        if let window = windows.values.first(where: { $0.id == windowID }) {
+            window.open(.tool(id))
+            NSApp.activate()
+            if let nsWindow = window.window {
+                if nsWindow.isMiniaturized { nsWindow.deminiaturize(nil) }
+                nsWindow.makeKeyAndOrderFront(nil)
+            }
+        } else {
+            show(.tool(id))
+        }
     }
 
     var hasOpenWindow: Bool { !windows.isEmpty }
@@ -132,6 +157,8 @@ final class AppModel {
 
     /// Shows a tool or page in the front window, opening one if none is open.
     func show(_ item: SidebarItem) {
+        var item = item
+        if case .tool(let id) = item, !isActive(id) { item = .catalog }
         if let window = frontWindow {
             window.open(item)
         } else {
@@ -149,8 +176,15 @@ final class AppModel {
         showWindow()
     }
 
-    private func updateActivationPolicy() {
-        let policy: NSApplication.ActivationPolicy = windows.isEmpty && showsMenuBarExtra ? .accessory : .regular
+    /// OpenToolbox leaves the Dock only while it runs in the menu bar with no window open.
+    /// `closing` is a window that is about to close and no longer counts.
+    private func updateActivationPolicy(closing: ObjectIdentifier? = nil) {
+        let hasOtherWindow = NSApp.windows.contains { window in
+            ObjectIdentifier(window) != closing && window.isVisible && window.styleMask.contains(.titled)
+                && !(window is NSPanel)
+        }
+        let policy: NSApplication.ActivationPolicy =
+            windows.isEmpty && showsMenuBarExtra && !hasOtherWindow ? .accessory : .regular
         if NSApp.activationPolicy() != policy { NSApp.setActivationPolicy(policy) }
     }
 

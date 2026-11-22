@@ -105,7 +105,8 @@ If installing an update fails when you quit, OpenToolbox tells you why the next 
 ## Known Limitations
 
 - Releases are not notarized (see [Install](#install)).
-- Closing a window stops the work running in its tools, such as a speed test or a duplicate scan.
+- Closing a window stops a Network Speed Test, Disk Speed Test or duplicate scan running in it. File batches already under way, such as converting or watermarking, finish and save their files.
+- Watermark works on single images and PDFs. Images with several frames or pages, such as animated GIFs and multipage TIFFs, are refused.
 - Watermarked PDFs keep each page's text and vector graphics, but links, form fields, comments and the outline are not kept as interactive items.
 - An update installs only when you restart or quit OpenToolbox, so while it stays open in the menu bar a downloaded update waits until you choose **Restart to Update** or quit.
 - Releases are ad-hoc signed, so an update's code signature proves the app is intact but not who built it. Trust in an update rests on the GitHub release it comes from.

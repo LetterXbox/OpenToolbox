@@ -186,7 +186,7 @@ struct PDFPasswordTests {
             #expect(throws: PDFPasswordError.alreadyProtected("restricted.pdf")) {
                 try PDFSecurity.protect(source, with: PDFProtection(openPassword: "x"), output: output, tool: tool)
             }
-            #expect(throws: PDFPasswordError.wrongPassword("restricted.pdf")) {
+            #expect(throws: PDFPasswordError.needsOwnerPassword("restricted.pdf")) {
                 try PDFSecurity.removePassword(source, password: "guess", output: output, tool: tool)
             }
             let unlocked = try PDFSecurity.removePassword(source, password: "owner", output: output, tool: tool)

@@ -12,6 +12,7 @@ struct AudioRecorderTests {
         try await withRecorder { fixture in
             let output = AVCaptureAudioFileOutput()
             let temporary = try fixture.recording(Data("audio".utf8))
+            let sibling = try fixture.sibling(of: temporary)
             fixture.recorder.adopt(output, session: nil, temporary: temporary, destination: fixture.destination)
             #expect(AudioRecorder.active.contains(fixture.recorder))
 
@@ -22,6 +23,7 @@ struct AudioRecorderTests {
             #expect(saved.path.hasPrefix(fixture.outputBase.path))
             #expect(fixture.recorder.failure == nil)
             #expect(!FileManager.default.fileExists(atPath: temporary.path))
+            #expect(FileManager.default.fileExists(atPath: sibling.path))
             #expect(!AudioRecorder.active.contains(fixture.recorder))
         }
     }
@@ -96,6 +98,7 @@ struct AudioRecorderTests {
             try Data().write(to: blocked)
             let output = AVCaptureAudioFileOutput()
             let temporary = try fixture.recording(Data("audio".utf8))
+            let sibling = try fixture.sibling(of: temporary)
             fixture.recorder.adopt(
                 output, session: nil, temporary: temporary,
                 destination: (OutputDirectory(baseDirectory: blocked), fixture.destination.tool))
@@ -105,6 +108,7 @@ struct AudioRecorderTests {
             #expect(fixture.recorder.saved == nil)
             #expect(fixture.recorder.failure != nil)
             #expect(fixture.store.recordings(of: [fixture.destination.tool]).count == 1)
+            #expect(FileManager.default.fileExists(atPath: sibling.path))
         }
     }
 
@@ -184,6 +188,12 @@ final class RecorderFixture {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appending(path: "recording.m4a")
         try contents.write(to: url)
+        return url
+    }
+
+    func sibling(of recording: URL) throws -> URL {
+        let url = recording.deletingLastPathComponent().appending(path: "other.m4a")
+        try Data("other".utf8).write(to: url)
         return url
     }
 

@@ -24,13 +24,13 @@ private func saveRecording(
     let folder = temporary.deletingLastPathComponent()
     switch outcome {
     case .saved(let url):
-        try? FileManager.default.removeItem(at: folder)
+        rmdir(folder.path)
         return (url, nil)
     case .kept(let url, let reason):
         guard url != temporary else {
             return (nil, L("The recording couldn't be saved: \(reason) It is still at \(url.path)."))
         }
-        try? FileManager.default.removeItem(at: folder)
+        rmdir(folder.path)
         return (nil, L("The recording couldn't be saved to the output folder: \(reason) It is kept below until you save it."))
     }
 }

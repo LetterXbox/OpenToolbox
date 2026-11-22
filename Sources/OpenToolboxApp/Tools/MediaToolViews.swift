@@ -18,9 +18,9 @@ private func temporaryFile(named name: String) throws -> URL {
 }
 
 private func saveRecording(
-    _ temporary: URL, named name: String, output: OutputDirectory, tool: ToolID
+    _ temporary: URL, named name: String, output: OutputDirectory, tool: ToolID, store: RecordingStore = .standard()
 ) -> (saved: URL?, failure: String?) {
-    let outcome = RecordingStore.standard().publish(temporary, named: name, output: output, tool: tool)
+    let outcome = store.publish(temporary, named: name, output: output, tool: tool)
     let folder = temporary.deletingLastPathComponent()
     switch outcome {
     case .saved(let url):
@@ -469,17 +469,19 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
     }
 
     @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let store: RecordingStore
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var destination: (output: OutputDirectory, tool: ToolID)?
-    fileprivate static var active: Set<AudioRecorder> = []
+    private(set) static var active: Set<AudioRecorder> = []
 
     @ObservationIgnored private var session: AVCaptureSession?
     @ObservationIgnored private var audioOutput: AVCaptureAudioFileOutput?
     @ObservationIgnored private var temporary: URL?
     @ObservationIgnored private var meterTask: Task<Void, Never>?
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, store: RecordingStore = .standard()) {
         self.defaults = defaults
+        self.store = store
         chosenMicrophone = defaults.string(forKey: Self.microphoneKey)
         super.init()
         refreshMicrophones()
@@ -510,29 +512,36 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
         failure = nil
         saved = nil
         phase = .starting
+        Self.active.insert(self)
         let generation = self.generation
         Task { await start(generation, output: output, tool: tool) }
     }
 
+    private func abandonStart(_ message: String) {
+        failure = message
+        phase = .idle
+        Self.active.remove(self)
+    }
+
     private func start(_ requested: Int, output: OutputDirectory, tool: ToolID) async {
+        guard requested == generation else { return }
         let granted = await AVAudioApplication.requestRecordPermission()
-        guard requested == generation else {
-            phase = .idle
-            return
-        }
+        guard requested == generation else { return }
         guard granted else {
-            failure = L("Allow OpenToolbox in System Settings → Privacy & Security → Microphone to record.")
-            phase = .idle
+            abandonStart(L("Allow OpenToolbox in System Settings → Privacy & Security → Microphone to record."))
             return
         }
         refreshMicrophones()
+        guard !microphones.isEmpty else {
+            abandonStart(L("No microphone found. Connect one, or choose an input in System Settings → Sound."))
+            return
+        }
         guard
             let id = MicrophoneChoice.device(
                 chosen: chosenMicrophone, connected: microphones.map(\.id), systemDefault: defaultMicrophone?.id),
             let device = AVCaptureDevice(uniqueID: id)
         else {
-            failure = L("No microphone found. Connect one, or choose an input in System Settings → Sound.")
-            phase = .idle
+            abandonStart(L("macOS has no default microphone right now. Choose one from the Microphone menu."))
             return
         }
         let session = AVCaptureSession()
@@ -543,49 +552,54 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
         do {
             let input = try AVCaptureDeviceInput(device: device)
             guard session.canAddInput(input), session.canAddOutput(fileOutput) else {
-                failure = L("Recording couldn't start. Check that a microphone is connected.")
-                phase = .idle
+                abandonStart(L("Recording couldn't start. Check that a microphone is connected."))
                 return
             }
             session.addInput(input)
             session.addOutput(fileOutput)
         } catch {
-            failure = error.localizedDescription
-            phase = .idle
+            abandonStart(error.localizedDescription)
             return
         }
         let handoff = Handoff(value: session)
         await Task.detached { handoff.value.startRunning() }.value
-        guard requested == generation, session.isRunning else {
-            if requested == generation {
-                failure = L("Recording couldn't start. Check that a microphone is connected.")
-            }
+        guard requested == generation else {
             Self.stopRunning(session)
-            phase = .idle
+            return
+        }
+        guard session.isRunning else {
+            Self.stopRunning(session)
+            abandonStart(L("Recording couldn't start. Check that a microphone is connected."))
             return
         }
         let url: URL
         do {
             url = try temporaryFile(named: "recording.m4a")
         } catch {
-            failure = error.localizedDescription
             Self.stopRunning(session)
-            phase = .idle
+            abandonStart(error.localizedDescription)
             return
         }
-        self.session = session
-        audioOutput = fileOutput
-        temporary = url
-        destination = (output, tool)
-        Self.active.insert(self)
+        adopt(fileOutput, session: session, temporary: url, destination: (output, tool))
         fileOutput.startRecording(to: url, outputFileType: .m4a, recordingDelegate: self)
-        phase = .recording(since: Date())
         meterTask = Task { [weak self] in
             while !Task.isCancelled {
                 self?.updateLevel()
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }
+    }
+
+    func adopt(
+        _ output: AVCaptureAudioFileOutput, session: AVCaptureSession?, temporary: URL,
+        destination: (output: OutputDirectory, tool: ToolID)
+    ) {
+        self.session = session
+        audioOutput = output
+        self.temporary = temporary
+        self.destination = destination
+        Self.active.insert(self)
+        phase = .recording(since: Date())
     }
 
     private func updateLevel() {
@@ -596,7 +610,12 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
 
     func close() {
         generation += 1
-        stop()
+        if phase == .starting {
+            phase = .idle
+            Self.active.remove(self)
+        } else {
+            stop()
+        }
     }
 
     func stop() {
@@ -611,15 +630,16 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
     private func finish(problem: String?) {
         defer { reset() }
         guard let temporary, let destination else { return }
-        let size = (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        guard size > 0 else {
+        let exists = FileManager.default.fileExists(atPath: temporary.path)
+        let size = try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        guard exists, size != 0 else {
             try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent())
             failure = problem.map { L("Recording failed: \($0)") } ?? L("Nothing was recorded.")
             return
         }
         let result = saveRecording(
             temporary, named: recordingName("Recording", extension: "m4a"), output: destination.output,
-            tool: destination.tool)
+            tool: destination.tool, store: store)
         saved = result.saved
         if let message = result.failure {
             failure = [problem, message].compactMap { $0 }.joined(separator: " ")

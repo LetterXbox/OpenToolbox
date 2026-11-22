@@ -193,6 +193,6 @@ public enum MicrophoneChoice {
 
     /// The microphone to record from: the chosen one while it's connected, otherwise the system default.
     public static func device(chosen: String?, connected: [String], systemDefault: String?) -> String? {
-        selection(chosen: chosen, connected: connected) ?? systemDefault ?? connected.first
+        selection(chosen: chosen, connected: connected) ?? systemDefault
     }
 }

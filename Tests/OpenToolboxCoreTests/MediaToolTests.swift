@@ -193,7 +193,8 @@ struct MicrophoneChoiceTests {
         #expect(MicrophoneChoice.selection(chosen: nil, connected: ["built-in"]) == nil)
         #expect(MicrophoneChoice.device(chosen: "usb", connected: ["built-in"], systemDefault: "built-in") == "built-in")
         #expect(MicrophoneChoice.device(chosen: nil, connected: ["built-in", "usb"], systemDefault: "usb") == "usb")
-        #expect(MicrophoneChoice.device(chosen: nil, connected: ["built-in"], systemDefault: nil) == "built-in")
+        #expect(MicrophoneChoice.device(chosen: nil, connected: ["built-in"], systemDefault: nil) == nil)
+        #expect(MicrophoneChoice.device(chosen: "usb", connected: ["built-in"], systemDefault: nil) == nil)
         #expect(MicrophoneChoice.device(chosen: "usb", connected: [], systemDefault: nil) == nil)
     }
 }

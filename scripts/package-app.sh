@@ -8,6 +8,7 @@ set -euo pipefail
 VERSION="${1:-0.1.0}"
 BUILD_NUMBER="${2:-1}"
 BUNDLE_ID="io.github.letterxbox.OpenToolbox"
+MIN_MACOS="15.0"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$ROOT/.build/release-app"
@@ -46,6 +47,14 @@ done
 echo "==> Assembling $APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 ditto "$PRODUCTS/OpenToolbox" "$APP/Contents/MacOS/OpenToolbox"
+
+# SwiftPM records the deployment target as the executable's SDK version, which makes
+# macOS draw the app in its old-SDK compatibility style. Record the SDK it was built with.
+SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+vtool -set-build-version macos "$MIN_MACOS" "$SDK_VERSION" -replace \
+    -output "$WORK/OpenToolbox.retagged" "$APP/Contents/MacOS/OpenToolbox"
+mv "$WORK/OpenToolbox.retagged" "$APP/Contents/MacOS/OpenToolbox"
+
 bundles=0
 for bundle in "$PRODUCTS"/*.bundle; do
     [ -e "$bundle" ] || continue
@@ -71,7 +80,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
-    <key>LSMinimumSystemVersion</key><string>15.0</string>
+    <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>NSHighResolutionCapable</key><true/>
@@ -91,11 +100,16 @@ echo "==> Ad-hoc signing"
 codesign --force --deep --sign - --timestamp=none "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
-echo "==> Architectures and deployment target"
+echo "==> Architectures, deployment target and SDK"
 lipo -archs "$APP/Contents/MacOS/OpenToolbox"
 for arch in arm64 x86_64; do
     echo "-- $arch"
-    vtool -arch "$arch" -show-build "$APP/Contents/MacOS/OpenToolbox" | grep -E 'platform|minos'
+    build="$(vtool -arch "$arch" -show-build "$APP/Contents/MacOS/OpenToolbox")"
+    echo "$build" | grep -E 'platform|minos|sdk'
+    if ! echo "$build" | grep -Eq "minos $MIN_MACOS\$" || ! echo "$build" | grep -Eq "sdk $SDK_VERSION\$"; then
+        echo "error: $arch slice must record minos $MIN_MACOS and sdk $SDK_VERSION" >&2
+        exit 1
+    fi
 done
 
 "$ROOT/scripts/make-dmg.sh" "$VERSION"

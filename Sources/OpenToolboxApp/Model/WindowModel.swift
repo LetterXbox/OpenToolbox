@@ -60,7 +60,6 @@ final class WindowModel {
         onFinish(tool, self)
     }
 
-    /// Clears the finished mark of the tool now in front of the user.
     func cameToFront() {
         if case .tool(let id) = selection { finishedTools.remove(id) }
     }

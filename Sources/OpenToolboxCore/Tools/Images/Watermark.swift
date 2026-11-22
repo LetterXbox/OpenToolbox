@@ -7,12 +7,15 @@ import PDFKit
 public enum WatermarkError: Error, Equatable, LocalizedError {
     case emptyText
     case multipleImages(String)
+    case noVisibleArea(page: Int)
 
     public var errorDescription: String? {
         switch self {
         case .emptyText: coreLocalized("Enter the watermark text.")
         case .multipleImages(let name):
             coreLocalized("“\(name)” holds several images or frames. Watermark supports single images and PDFs.")
+        case .noVisibleArea(let page):
+            coreLocalized("Page \(page) of this PDF has no visible area, so it can't be watermarked.")
         }
     }
 }
@@ -136,6 +139,7 @@ public enum Watermark {
                 let bounds = Mark.lineBounds(text, fontSize: 100, color: color.cgColor)
                 aspectRatio = bounds.width / max(bounds.height, 1)
             case .image(let url):
+                try Watermark.requireSingleImage(url)
                 let image = try ImageProcessor.loadImage(at: url).image
                 kind = .image(image)
                 aspectRatio = CGFloat(image.width) / CGFloat(max(image.height, 1))
@@ -197,7 +201,8 @@ public enum Watermark {
             width *= scale
             height *= scale
         }
-        return frames(markSize: footprint(width, height), canvas: canvas, position: options.position).map { box in
+        let spacing = options.position == .tiled ? CGSize(width: width, height: height) : footprint(width, height)
+        return frames(markSize: spacing, canvas: canvas, position: options.position).map { box in
             CGRect(x: box.midX - width / 2, y: box.midY - height / 2, width: width, height: height)
         }
     }
@@ -218,15 +223,19 @@ public enum Watermark {
         toImage source: URL, options: WatermarkOptions, output: OutputDirectory, tool: ToolID
     ) throws -> URL {
         let mark = try Mark(options.content, color: options.textColor)
-        if let imageSource = CGImageSourceCreateWithURL(source as CFURL, nil), CGImageSourceGetCount(imageSource) > 1 {
-            throw WatermarkError.multipleImages(source.lastPathComponent)
-        }
+        try requireSingleImage(source)
         let loaded = try ImageProcessor.loadImage(at: source)
         let format = ImageProcessor.resolvedFormat(nil, sourceType: loaded.type)
         let rendered = try render(loaded.image, mark: mark, options: options, opaque: !format.supportsAlpha)
         let metadata = ImageProcessor.filteredMetadata(loaded.properties, mode: .keep)
         return try output.writeOutput(forSource: source, tool: tool, newExtension: format.fileExtension) {
             try ImageProcessor.write(rendered, to: $0, format: format, quality: 0.92, metadata: metadata)
+        }
+    }
+
+    static func requireSingleImage(_ url: URL) throws {
+        if let source = CGImageSourceCreateWithURL(url as CFURL, nil), CGImageSourceGetCount(source) > 1 {
+            throw WatermarkError.multipleImages(url.lastPathComponent)
         }
     }
 
@@ -273,10 +282,10 @@ public enum Watermark {
         for index in 0..<document.pageCount {
             guard let page = document.page(at: index) else { continue }
             let media = page.bounds(for: .mediaBox)
-            let visible = page.bounds(for: .cropBox).intersection(media)
+            let visible = try visibleArea(media: media, crop: page.bounds(for: .cropBox), page: index + 1)
             let rotation = ((page.rotation % 360) + 360) % 360
             var mediaBox = outputRect(media, media: media, rotation: rotation)
-            var cropBox = outputRect(visible.isNull ? media : visible, media: media, rotation: rotation)
+            var cropBox = outputRect(visible, media: media, rotation: rotation)
             let pageInfo: [CFString: Any] = [
                 kCGPDFContextMediaBox: Data(bytes: &mediaBox, count: MemoryLayout<CGRect>.size),
                 kCGPDFContextCropBox: Data(bytes: &cropBox, count: MemoryLayout<CGRect>.size),
@@ -288,6 +297,16 @@ public enum Watermark {
             context.endPDFPage()
         }
         context.closePDF()
+    }
+
+    /// The part of the page a viewer shows. A crop box outside the media box, or an empty one,
+    /// is refused rather than replaced by the whole page.
+    static func visibleArea(media: CGRect, crop: CGRect, page: Int) throws -> CGRect {
+        let visible = crop.intersection(media)
+        guard !visible.isNull, !visible.isInfinite, visible.width > 0, visible.height > 0,
+            [visible.minX, visible.minY, visible.width, visible.height].allSatisfy(\.isFinite)
+        else { throw WatermarkError.noVisibleArea(page: page) }
+        return visible
     }
 
     /// Where a rectangle in a page's own space lands on the upright output page, whose media box

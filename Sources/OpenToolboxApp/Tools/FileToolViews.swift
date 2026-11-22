@@ -297,9 +297,24 @@ struct BatchRenameView: View {
                 .disabled(!canApply)
                 Button(L("Undo Last Rename")) { undo() }
                     .disabled(session.undoJournal == nil || session.isRenaming || session.isRecycling)
-                if session.isRenaming { ProgressView().controlSize(.small) }
+                if isWorkingHere { ProgressView().controlSize(.small) }
+            }
+            if session.undoJournal != nil, let summary = lastRenameSummary {
+                Text(summary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var lastRenameSummary: String? {
+        let folders = Set(session.undoScopes.map { $0.deletingLastPathComponent().lastPathComponent })
+        guard !session.undoScopes.isEmpty else { return nil }
+        let count = session.undoScopes.count
+        if folders.count == 1, let folder = folders.first {
+            return L("Undo restores the last rename in any window: \(count) files in “\(folder)”.")
+        }
+        return L("Undo restores the last rename in any window: \(count) files in \(folders.count) folders.")
     }
 
     private func resultSummary(_ result: RenameResult) -> some View {

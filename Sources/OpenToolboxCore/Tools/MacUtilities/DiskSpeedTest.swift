@@ -46,8 +46,8 @@ public struct SpeedTestVolume: Identifiable, Hashable, Sendable {
     public let testDirectory: URL
     public let isReadOnly: Bool
     public let availableBytes: Int64?
-    /// Identifies the volume, so a different drive mounted at the same path is not tested by mistake.
-    public let volumeUUID: String?
+    /// Identifies the mounted file system, so a different drive mounted at the same path is not tested.
+    public let fileSystemID: UInt64
 
     public var id: URL { mountPoint }
 
@@ -55,7 +55,6 @@ public struct SpeedTestVolume: Identifiable, Hashable, Sendable {
     public static func mounted() -> [SpeedTestVolume] {
         let keys: [URLResourceKey] = [
             .volumeNameKey, .volumeLocalizedNameKey, .volumeIsReadOnlyKey, .volumeIsLocalKey, .volumeIsBrowsableKey,
-            .volumeUUIDStringKey,
         ]
         let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
         let volumes = urls.compactMap { url -> SpeedTestVolume? in
@@ -65,14 +64,14 @@ public struct SpeedTestVolume: Identifiable, Hashable, Sendable {
             // The startup disk's root is the sealed, read-only system volume; its data volume holds the temporary folder.
             let isStartup = url.path == "/"
             let directory = isStartup ? FileManager.default.temporaryDirectory : url
+            guard let fileSystemID = DiskSpeedTest.fileSystemID(of: directory) else { return nil }
             let isReadOnly = isStartup
                 ? (try? directory.resourceValues(forKeys: [.volumeIsReadOnlyKey]))?.volumeIsReadOnly ?? false
                 : values.volumeIsReadOnly ?? false
             return SpeedTestVolume(
                 name: values.volumeLocalizedName ?? values.volumeName ?? url.lastPathComponent,
                 mountPoint: url, testDirectory: directory, isReadOnly: isReadOnly,
-                availableBytes: DiskSpeedTest.availableBytes(at: directory),
-                volumeUUID: DiskSpeedTest.volumeUUID(of: directory))
+                availableBytes: DiskSpeedTest.availableBytes(at: directory), fileSystemID: fileSystemID)
         }
         return volumes.sorted { lhs, rhs in
             if lhs.mountPoint.path == "/" { return true }
@@ -110,8 +109,21 @@ public enum DiskSpeedTest {
         return Int64(stats.f_bavail) * Int64(stats.f_bsize)
     }
 
-    static func volumeUUID(of directory: URL) -> String? {
-        (try? directory.resourceValues(forKeys: [.volumeUUIDStringKey]))?.volumeUUIDString
+    /// The mounted file system's identifier (`f_fsid`), which changes when a different drive is mounted.
+    public static func fileSystemID(of directory: URL) -> UInt64? {
+        var stats = statfs()
+        guard statfs(directory.path, &stats) == 0 else { return nil }
+        return fileSystemID(stats)
+    }
+
+    static func fileSystemID(_ stats: statfs) -> UInt64 {
+        UInt64(UInt32(bitPattern: stats.f_fsid.val.0)) << 32 | UInt64(UInt32(bitPattern: stats.f_fsid.val.1))
+    }
+
+    static func availableBytes(descriptor: Int32) -> Int64? {
+        var stats = statfs()
+        guard fstatfs(descriptor, &stats) == 0 else { return nil }
+        return Int64(stats.f_bavail) * Int64(stats.f_bsize)
     }
 
     /// Throws when the volume can't hold the test file plus the reserve, or its free space is unknown.
@@ -127,7 +139,6 @@ public enum DiskSpeedTest {
     private static let runLock = NSLock()
     nonisolated(unsafe) private static var isRunning = false
 
-    /// Claims the single test slot. Returns `false` when another test holds it.
     static func claim() -> Bool {
         runLock.withLock {
             guard !isRunning else { return false }
@@ -140,33 +151,42 @@ public enum DiskSpeedTest {
         runLock.withLock { isRunning = false }
     }
 
-    /// Runs the test in `directory`. Cancelling the calling task stops it with `CancellationError`.
-    /// `expectedVolumeUUID`, when given, must match the volume `directory` is on.
+    /// Runs the test in `directory`, which must be on the file system `expectedFileSystem`.
+    /// Cancelling the calling task stops it with `CancellationError`.
     public static func run(
-        in directory: URL, volumeName: String, expectedVolumeUUID: String? = nil, bytes: Int64,
+        in directory: URL, volumeName: String, expectedFileSystem: UInt64, bytes: Int64,
         blockSize: Int = defaultBlockSize, reserve: Int64 = reserveBytes,
         progress: @Sendable (Phase, Double) -> Void = { _, _ in }
+    ) throws -> DiskSpeedResult {
+        try run(
+            in: directory, volumeName: volumeName, expectedFileSystem: expectedFileSystem, bytes: bytes,
+            blockSize: blockSize, reserve: reserve, freeSpace: availableBytes(descriptor:), progress: progress)
+    }
+
+    static func run(
+        in directory: URL, volumeName: String, expectedFileSystem: UInt64, bytes: Int64,
+        blockSize: Int, reserve: Int64, freeSpace: (Int32) -> Int64?,
+        progress: @Sendable (Phase, Double) -> Void
     ) throws -> DiskSpeedResult {
         guard claim() else { throw DiskSpeedError.alreadyRunning }
         defer { release() }
 
-        let values = try? directory.resourceValues(forKeys: [.volumeIsReadOnlyKey])
-        if values?.volumeIsReadOnly == true { throw DiskSpeedError.readOnly(volumeName) }
-        if let expectedVolumeUUID, volumeUUID(of: directory) != expectedVolumeUUID {
+        let folder = open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard folder >= 0 else { throw DiskSpeedError.cannotWrite(volumeName) }
+        defer { close(folder) }
+        var folderStats = statfs()
+        guard fstatfs(folder, &folderStats) == 0, fileSystemID(folderStats) == expectedFileSystem else {
             throw DiskSpeedError.volumeChanged(volumeName)
         }
-        var directoryStat = stat()
-        guard stat(directory.path, &directoryStat) == 0 else { throw DiskSpeedError.cannotWrite(volumeName) }
-        try checkSpace(needed: bytes, available: availableBytes(at: directory), reserve: reserve, volumeName: volumeName)
+        if folderStats.f_flags & UInt32(MNT_RDONLY) != 0 { throw DiskSpeedError.readOnly(volumeName) }
+        try checkSpace(needed: bytes, available: freeSpace(folder), reserve: reserve, volumeName: volumeName)
 
-        let path = directory.appending(path: ".OpenToolbox-speed-test-\(UUID().uuidString)", directoryHint: .notDirectory).path
-        let descriptor = open(path, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        let name = ".OpenToolbox-speed-test-\(UUID().uuidString)"
+        let descriptor = openat(folder, name, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { throw DiskSpeedError.cannotWrite(volumeName) }
         defer { close(descriptor) }
-        guard unlink(path) == 0 else { throw DiskSpeedError.cleanupFailed(path: path) }
-        var fileStat = stat()
-        guard fstat(descriptor, &fileStat) == 0, fileStat.st_dev == directoryStat.st_dev else {
-            throw DiskSpeedError.volumeChanged(volumeName)
+        guard unlinkat(folder, name, 0) == 0 else {
+            throw DiskSpeedError.cleanupFailed(path: directory.appending(path: name, directoryHint: .notDirectory).path)
         }
         guard fcntl(descriptor, F_NOCACHE, 1) == 0 else { throw DiskSpeedError.cacheBypassUnavailable(volumeName) }
 
@@ -179,12 +199,15 @@ public enum DiskSpeedTest {
         let clock = ContinuousClock()
         let writeStart = clock.now
         let spaceCheckInterval = Int64(size) * 8
+        var nextSpaceCheck: Int64 = 0
         try transfer(total, blockSize: size, phase: .writing, progress: progress) { offset, count in
-            if offset % spaceCheckInterval == 0 {
+            if offset >= nextSpaceCheck {
                 let remaining = total - offset
-                if let available = availableBytes(at: directory), available - remaining < reserve {
+                guard let available = freeSpace(descriptor) else { throw DiskSpeedError.spaceUnknown(volumeName) }
+                if available - remaining < reserve {
                     throw DiskSpeedError.notEnoughSpace(needed: remaining + reserve, available: available)
                 }
+                nextSpaceCheck = offset + spaceCheckInterval
             }
             return pwrite(descriptor, buffer, count, offset)
         }

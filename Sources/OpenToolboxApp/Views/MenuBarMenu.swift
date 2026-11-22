@@ -60,8 +60,6 @@ struct MenuBarMenu: View {
     }
 }
 
-/// The menu bar icon. It also opens the Software Update window when an automatic check asks for
-/// it while no OpenToolbox window is open.
 struct MenuBarLabel: View {
     let updates: UpdateCenter
     @Environment(\.openWindow) private var openWindow

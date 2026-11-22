@@ -121,7 +121,6 @@ final class AppModel {
         activeTools.contains { $0.id == id }
     }
 
-    /// Shows a tool whose work finished, in the window it ran in when that window is still open.
     private func reveal(_ id: ToolID, in windowID: UUID?) {
         guard isActive(id) else { return showWindow() }
         if let window = windows.values.first(where: { $0.id == windowID }) {
@@ -138,7 +137,6 @@ final class AppModel {
 
     var hasOpenWindow: Bool { !windows.isEmpty }
 
-    /// The window that was last in front, or `nil` when every window is closed.
     private var frontWindow: WindowModel? {
         if let activeWindow, windows[ObjectIdentifier(activeWindow)] != nil { return activeWindow }
         return windows.values.first
@@ -176,8 +174,6 @@ final class AppModel {
         showWindow()
     }
 
-    /// OpenToolbox leaves the Dock only while it runs in the menu bar with no window open.
-    /// `closing` is a window that is about to close and no longer counts.
     private func updateActivationPolicy(closing: ObjectIdentifier? = nil) {
         let hasOtherWindow = NSApp.windows.contains { window in
             ObjectIdentifier(window) != closing && window.isVisible && window.styleMask.contains(.titled)

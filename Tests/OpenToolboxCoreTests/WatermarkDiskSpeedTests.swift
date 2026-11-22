@@ -187,6 +187,43 @@ extension WatermarkTests {
         #expect(Watermark.outputRect(crop, media: media, rotation: rotation) == expected)
     }
 
+    @Test func diagonalTilesStillCoverThePage() {
+        let canvas = CGSize(width: 1000, height: 400)
+        let options = WatermarkOptions(content: .text("x"), position: .tiled, relativeWidth: 0.4, isDiagonal: true)
+        let rects = Watermark.layout(aspectRatio: 10, canvas: canvas, options: options)
+        let rows = Set(rects.map { Int($0.minY.rounded()) })
+        #expect(rows.count >= 3, "\(rows.sorted())")
+    }
+
+    @Test func aCropBoxOutsideThePageIsRefused() throws {
+        let media = CGRect(x: 0, y: 0, width: 600, height: 800)
+        #expect(throws: WatermarkError.noVisibleArea(page: 2)) {
+            try Watermark.visibleArea(media: media, crop: CGRect(x: 700, y: 900, width: 100, height: 100), page: 2)
+        }
+        #expect(throws: WatermarkError.noVisibleArea(page: 1)) {
+            try Watermark.visibleArea(media: media, crop: CGRect(x: 100, y: 100, width: 0, height: 50), page: 1)
+        }
+        #expect(try Watermark.visibleArea(media: media, crop: CGRect(x: 500, y: 700, width: 300, height: 300), page: 1)
+            == CGRect(x: 500, y: 700, width: 100, height: 100))
+    }
+
+    @Test func multiFrameArtworkIsRefused() async throws {
+        try await withTemporaryDirectory { directory in
+            let artwork = directory.appending(path: "logo.tiff")
+            let destination = try #require(CGImageDestinationCreateWithURL(artwork as CFURL, "public.tiff" as CFString, 2, nil))
+            CGImageDestinationAddImage(destination, try makeTestImage(width: 40, height: 40), nil)
+            CGImageDestinationAddImage(destination, try makeTestImage(width: 40, height: 40), nil)
+            #expect(CGImageDestinationFinalize(destination))
+            let source = directory.appending(path: "photo.png")
+            try ImageProcessor.write(try makeTestImage(width: 120, height: 80), to: source, format: .png)
+            let output = OutputDirectory(baseDirectory: directory.appending(path: "out"))
+            #expect(throws: WatermarkError.multipleImages("logo.tiff")) {
+                try Watermark.apply(
+                    toImage: source, options: WatermarkOptions(content: .image(artwork)), output: output, tool: "image.watermark")
+            }
+        }
+    }
+
     @Test func pdfCopiesKeepTheCropBox() async throws {
         try await withTemporaryDirectory { directory in
             let document = PDFTools.makePDF(fromImages: [try makeTestImage(width: 600, height: 800)])
@@ -237,17 +274,40 @@ struct DiskSpeedTests {
         var all: [(DiskSpeedTest.Phase, Double)] { lock.withLock { entries } }
     }
 
+    private final class SpaceReadings: @unchecked Sendable {
+        private let lock = NSLock()
+        private var readings: [Int64?]
+        private(set) var count = 0
+
+        init(_ readings: [Int64?]) {
+            self.readings = readings
+        }
+
+        func next(_: Int32) -> Int64? {
+            lock.withLock {
+                count += 1
+                return readings.count > 1 ? readings.removeFirst() : readings.first ?? nil
+            }
+        }
+    }
+
     private func contents(of directory: URL) throws -> [String] {
         try FileManager.default.contentsOfDirectory(atPath: directory.path)
     }
+
+    private func fileSystem(of directory: URL) throws -> UInt64 {
+        try #require(DiskSpeedTest.fileSystemID(of: directory))
+    }
+
+    private let megabyte = 1024 * 1024
 
     @Test func measuresWriteAndReadAndLeavesNothingBehind() async throws {
         try await withTemporaryDirectory { directory in
             let log = ProgressLog()
             let result = try DiskSpeedTest.run(
-                in: directory, volumeName: "Test", bytes: 4 * 1024 * 1024, blockSize: 1024 * 1024, reserve: 0,
-                progress: { log.add($0, $1) })
-            #expect(result.bytes == 4 * 1024 * 1024)
+                in: directory, volumeName: "Test", expectedFileSystem: try fileSystem(of: directory),
+                bytes: Int64(4 * megabyte), blockSize: megabyte, reserve: 0, progress: { log.add($0, $1) })
+            #expect(result.bytes == Int64(4 * megabyte))
             #expect(result.writeBytesPerSecond > 0 && result.readBytesPerSecond > 0)
             #expect(try contents(of: directory).isEmpty)
             #expect(log.all.contains { $0.0 == .writing && $0.1 == 1 })
@@ -257,10 +317,13 @@ struct DiskSpeedTests {
 
     @Test func cancellingStopsTheTestAndLeavesNothingBehind() async throws {
         try await withTemporaryDirectory { directory in
+            let fileSystem = try fileSystem(of: directory)
+            let megabyte = self.megabyte
             let task = Task {
                 withUnsafeCurrentTask { $0?.cancel() }
                 return try DiskSpeedTest.run(
-                    in: directory, volumeName: "Test", bytes: 64 * 1024 * 1024, blockSize: 1024 * 1024, reserve: 0)
+                    in: directory, volumeName: "Test", expectedFileSystem: fileSystem, bytes: Int64(64 * megabyte),
+                    blockSize: megabyte, reserve: 0)
             }
             await #expect(throws: CancellationError.self) { try await task.value }
             let leftovers = try contents(of: directory)
@@ -283,35 +346,60 @@ struct DiskSpeedTests {
 
     @Test func onlyOneTestRunsAtATime() async throws {
         try await withTemporaryDirectory { directory in
+            let fileSystem = try fileSystem(of: directory)
             #expect(DiskSpeedTest.claim())
             #expect(throws: DiskSpeedError.alreadyRunning) {
-                try DiskSpeedTest.run(in: directory, volumeName: "Test", bytes: 1024 * 1024, reserve: 0)
+                try DiskSpeedTest.run(
+                    in: directory, volumeName: "Test", expectedFileSystem: fileSystem, bytes: Int64(megabyte), reserve: 0)
             }
             DiskSpeedTest.release()
             let leftovers = try contents(of: directory)
             #expect(leftovers.isEmpty)
-            _ = try DiskSpeedTest.run(in: directory, volumeName: "Test", bytes: 1024 * 1024, blockSize: 1024 * 1024, reserve: 0)
+            _ = try DiskSpeedTest.run(
+                in: directory, volumeName: "Test", expectedFileSystem: fileSystem, bytes: Int64(megabyte),
+                blockSize: megabyte, reserve: 0)
         }
     }
 
-    @Test func refusesADifferentVolumeThanTheOneChosen() async throws {
+    @Test func refusesADifferentFileSystemThanTheOneChosen() async throws {
         try await withTemporaryDirectory { directory in
+            let other = try fileSystem(of: directory) ^ 1
             #expect(throws: DiskSpeedError.volumeChanged("Test")) {
                 try DiskSpeedTest.run(
-                    in: directory, volumeName: "Test", expectedVolumeUUID: "00000000-0000-0000-0000-000000000000",
-                    bytes: 1024 * 1024, reserve: 0)
+                    in: directory, volumeName: "Test", expectedFileSystem: other, bytes: Int64(megabyte), reserve: 0)
             }
         }
     }
 
-    @Test func stopsWhenTheReserveWouldBeUsed() async throws {
+    @Test func stopsWritingWhenFreeSpaceDropsIntoTheReserve() async throws {
         try await withTemporaryDirectory { directory in
-            let available = try #require(DiskSpeedTest.availableBytes(at: directory))
-            #expect(throws: DiskSpeedError.self) {
-                try DiskSpeedTest.run(in: directory, volumeName: "Test", bytes: 1024 * 1024, reserve: available)
+            let plenty = Int64(1) << 40
+            let readings = SpaceReadings([plenty, plenty, 0])
+            let log = ProgressLog()
+            #expect(throws: DiskSpeedError.notEnoughSpace(needed: Int64(8 * megabyte) + 100, available: 0)) {
+                try DiskSpeedTest.run(
+                    in: directory, volumeName: "Test", expectedFileSystem: try fileSystem(of: directory),
+                    bytes: Int64(16 * megabyte), blockSize: megabyte, reserve: 100, freeSpace: readings.next,
+                    progress: { log.add($0, $1) })
             }
-            let leftovers = try contents(of: directory)
-            #expect(leftovers.isEmpty)
+            #expect(readings.count == 3)
+            #expect(log.all.contains { $0.0 == .writing && $0.1 == 0.5 })
+            #expect(!log.all.contains { $0.0 == .reading })
+            #expect(try contents(of: directory).isEmpty)
+        }
+    }
+
+    @Test func stopsWritingWhenFreeSpaceCannotBeRead() async throws {
+        try await withTemporaryDirectory { directory in
+            let plenty = Int64(1) << 40
+            let readings = SpaceReadings([plenty, plenty, nil])
+            #expect(throws: DiskSpeedError.spaceUnknown("Test")) {
+                try DiskSpeedTest.run(
+                    in: directory, volumeName: "Test", expectedFileSystem: try fileSystem(of: directory),
+                    bytes: Int64(16 * megabyte), blockSize: megabyte, reserve: 0, freeSpace: readings.next,
+                    progress: { _, _ in })
+            }
+            #expect(try contents(of: directory).isEmpty)
         }
     }
 
@@ -319,7 +407,8 @@ struct DiskSpeedTests {
         try await withTemporaryDirectory { directory in
             let missing = directory.appending(path: "missing", directoryHint: .isDirectory)
             #expect(throws: DiskSpeedError.cannotWrite("Test")) {
-                try DiskSpeedTest.run(in: missing, volumeName: "Test", bytes: 1024 * 1024, reserve: 0)
+                try DiskSpeedTest.run(
+                    in: missing, volumeName: "Test", expectedFileSystem: 0, bytes: Int64(megabyte), reserve: 0)
             }
         }
     }
@@ -330,5 +419,6 @@ struct DiskSpeedTests {
         #expect(startup.mountPoint.path == "/")
         #expect(startup.testDirectory == FileManager.default.temporaryDirectory)
         #expect(!startup.isReadOnly)
+        #expect(startup.fileSystemID == DiskSpeedTest.fileSystemID(of: FileManager.default.temporaryDirectory))
     }
 }

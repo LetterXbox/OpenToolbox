@@ -88,6 +88,35 @@ enum FileToolDisk {
         return FileSnapshot(info)
     }
 
+    static func identity(of file: Int32) -> FileIdentity? {
+        var info = stat()
+        guard fstat(file, &info) == 0 else { return nil }
+        return FileIdentity(info)
+    }
+
+    static func directoryIdentity(at url: URL) -> FileIdentity? {
+        guard let fd = try? openDirectory(url) else { return nil }
+        defer { close(fd) }
+        return identity(of: fd)
+    }
+
+    static func checkDirectory(_ fd: Int32, at url: URL) throws {
+        guard let identity = identity(of: fd), directoryIdentity(at: url) == identity else {
+            throw FileToolError.changed(url)
+        }
+    }
+
+    static func pathOfSingleLink(at file: Int32) -> URL? {
+        var info = stat()
+        guard fstat(file, &info) == 0, info.st_nlink == 1 else { return nil }
+        var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        return path.withUnsafeMutableBufferPointer { buffer in
+            guard let base = buffer.baseAddress,
+                  fcntl(file, F_GETPATH, UnsafeMutableRawPointer(base)) == 0 else { return nil }
+            return URL(fileURLWithFileSystemRepresentation: base, isDirectory: false, relativeTo: nil)
+        }
+    }
+
     static func openDirectory(_ url: URL) throws -> Int32 {
         let fd = open(url.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
         guard fd >= 0 else { throw posixError(at: url) }
@@ -142,6 +171,19 @@ enum FileToolDisk {
     static func move(_ name: String, from source: Int32, to target: Int32, at url: URL) throws {
         guard renameatx_np(source, name, target, name, UInt32(RENAME_EXCL)) == 0 else {
             throw posixError(at: url)
+        }
+    }
+
+    static func restore(
+        _ source: URL, from directory: Int32, matching identity: FileIdentity,
+        to target: Int32, at destination: URL
+    ) throws {
+        let name = source.lastPathComponent
+        guard entry(name, in: directory).map(FileIdentity.init) == identity else {
+            throw FileToolError.changed(source)
+        }
+        guard renameatx_np(directory, name, target, destination.lastPathComponent, UInt32(RENAME_EXCL)) == 0 else {
+            throw posixError(at: destination)
         }
     }
 

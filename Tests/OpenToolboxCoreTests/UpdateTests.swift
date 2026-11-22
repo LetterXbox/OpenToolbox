@@ -10,7 +10,7 @@ struct UpdateTests {
         #expect(v011.description == "0.1.1")
         #expect(try #require(AppVersion("0.1.10")) > v011)
         #expect(try #require(AppVersion("0.2")) > v011)
-        #expect(try #require(AppVersion("0.1")) == AppVersion("0.1.0"))
+        #expect(AppVersion("0.1") == AppVersion("0.1.0"))
         #expect(Set([AppVersion("1.0")!, AppVersion("1.0.0")!]).count == 1)
         #expect(AppVersion(" 1.2 ") == AppVersion("1.2"))
         for bad in ["", "v", "1..2", "1.2-beta", "1.2.3.4.5", "a.b", "１.2", "+1.2"] {

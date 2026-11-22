@@ -1,9 +1,6 @@
-"""Builds the macOS iconset from AppIcon-1024.png; scripts/package-app.sh turns the iconset into AppIcon.icns.
+"""Builds AppIcon.iconset from AppIcon-1024.png.
 
-Each size is a high-quality (Lanczos) downscale of the 1024 px master.
-Requires Pillow (pip install Pillow). Run from anywhere:
-
-    python Design/AppIcon/render_iconset.py
+Usage (requires Pillow): python Design/AppIcon/render_iconset.py
 """
 
 from pathlib import Path
@@ -14,7 +11,6 @@ HERE = Path(__file__).resolve().parent
 MASTER = HERE / "AppIcon-1024.png"
 ICONSET = HERE / "AppIcon.iconset"
 
-# (file name, pixel size) as iconutil expects them.
 SIZES = [
     (f"icon_{points}x{points}{suffix}.png", points * scale)
     for points in (16, 32, 128, 256, 512)

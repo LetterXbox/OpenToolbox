@@ -119,23 +119,19 @@ public enum ToolCatalog {
         ToolDescriptor(
             id: "text.translate", category: .textAndFiles,
             title: "Translate", summary: "Translate text on-device with Apple Translation.",
-            symbolName: "translate", keywords: ["translate", "translation", "language"],
-            availability: .planned),
+            symbolName: "translate", keywords: ["translate", "translation", "language"]),
         ToolDescriptor(
             id: "text.speech", category: .textAndFiles,
             title: "Text to Speech", summary: "Read text aloud or save it as an audio file.",
-            symbolName: "speaker.wave.2", keywords: ["speech", "speak", "voice", "tts", "read aloud", "audio"],
-            availability: .planned),
+            symbolName: "speaker.wave.2", keywords: ["speech", "speak", "voice", "tts", "read aloud", "audio"]),
         ToolDescriptor(
             id: "text.transcribe", category: .textAndFiles,
             title: "Transcribe", summary: "Turn speech in audio and video files into text, on-device.",
-            symbolName: "waveform", keywords: ["transcribe", "transcript", "speech", "subtitles", "srt", "dictation"],
-            availability: .planned),
+            symbolName: "waveform", keywords: ["transcribe", "transcript", "speech", "subtitles", "srt", "dictation"]),
         ToolDescriptor(
             id: "text.summarize", category: .textAndFiles,
             title: "Summarize", summary: "Summarize text and documents on-device with Apple Intelligence.",
-            symbolName: "sparkles", keywords: ["summarize", "summary", "tldr", "ai", "apple intelligence"],
-            availability: .planned),
+            symbolName: "sparkles", keywords: ["summarize", "summary", "tldr", "ai", "apple intelligence"]),
     ]
 
     // MARK: - Images & PDF

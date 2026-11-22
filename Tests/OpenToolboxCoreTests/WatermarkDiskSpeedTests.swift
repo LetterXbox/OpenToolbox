@@ -192,7 +192,8 @@ struct DiskSpeedTests {
                     in: directory, volumeName: "Test", bytes: 64 * 1024 * 1024, blockSize: 1024 * 1024, reserve: 0)
             }
             await #expect(throws: CancellationError.self) { try await task.value }
-            #expect(try contents(of: directory).isEmpty)
+            let leftovers = try contents(of: directory)
+            #expect(leftovers.isEmpty)
         }
     }
 

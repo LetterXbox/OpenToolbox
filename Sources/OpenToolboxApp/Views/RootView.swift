@@ -21,7 +21,11 @@ struct RootView: View {
         }
         .environment(window)
         .focusedSceneValue(\.windowModel, window)
-        .background(WindowReader { window.window = $0 })
+        .background(
+            WindowReader { nsWindow in
+                window.window = nsWindow
+                if nsWindow?.isKeyWindow == true { model.windowBecameKey(window) }
+            })
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             if let key = note.object as? NSWindow, key === window.window { model.windowBecameKey(window) }
         }

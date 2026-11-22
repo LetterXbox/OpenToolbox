@@ -243,6 +243,8 @@ enum ToolViewRegistry {
         case "pdf.organize": PDFOrganizeView(tool: tool)
         case "pdf.images": ImagesPDFView(tool: tool)
         case "image.watermark": WatermarkView(tool: tool)
+        case "image.compress": CompressImagesView(tool: tool)
+        case "pdf.password": PDFPasswordView(tool: tool)
         case "files.batch-rename": BatchRenameView(tool: tool)
         case "files.duplicates": FindDuplicatesView(tool: tool)
         case "mac.keep-awake": KeepAwakeView(tool: tool)

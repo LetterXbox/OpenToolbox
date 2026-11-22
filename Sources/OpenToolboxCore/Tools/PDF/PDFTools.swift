@@ -108,6 +108,13 @@ public enum PDFTools {
         return result
     }
 
+    /// A copy without the given 0-based pages. Deleting every page is an error.
+    public static func delete(_ pages: Set<Int>, from document: PDFDocument) throws -> PDFDocument {
+        let kept = (0..<document.pageCount).filter { !pages.contains($0) }
+        guard !kept.isEmpty else { throw PDFToolError.empty }
+        return extract(kept, from: document)
+    }
+
     /// Splits into chunks of `pagesPerFile` pages.
     public static func split(_ document: PDFDocument, pagesPerFile: Int) -> [PDFDocument] {
         let size = max(1, pagesPerFile)

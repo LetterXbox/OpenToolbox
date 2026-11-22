@@ -116,12 +116,12 @@ public enum Transcriber {
     }
 
     public static func requestAuthorization() async -> Bool {
-        await authorization(status: SFSpeechRecognizer.authorizationStatus(), request: SFSpeechRecognizer.requestAuthorization)
+        await authorization(status: SFSpeechRecognizer.authorizationStatus()) { SFSpeechRecognizer.requestAuthorization($0) }
     }
 
     static func authorization(
         status: SFSpeechRecognizerAuthorizationStatus,
-        request: (@escaping @Sendable (SFSpeechRecognizerAuthorizationStatus) -> Void) -> Void
+        request: @Sendable (@escaping @Sendable (SFSpeechRecognizerAuthorizationStatus) -> Void) -> Void
     ) async -> Bool {
         if status == .authorized { return true }
         guard status == .notDetermined else { return false }

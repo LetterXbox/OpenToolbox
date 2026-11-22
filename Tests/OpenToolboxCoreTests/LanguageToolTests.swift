@@ -107,7 +107,7 @@ struct TranscriberAuthorizationTests {
     }
 
     @Test func decidedStatusesDontAskAgain() async {
-        let neverAsk: (@escaping @Sendable (SFSpeechRecognizerAuthorizationStatus) -> Void) -> Void = { _ in
+        let neverAsk: @Sendable (@escaping @Sendable (SFSpeechRecognizerAuthorizationStatus) -> Void) -> Void = { _ in
             Issue.record("asked again")
         }
         #expect(await Transcriber.authorization(status: .authorized, request: neverAsk))

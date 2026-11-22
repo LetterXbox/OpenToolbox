@@ -4,7 +4,6 @@ import Foundation
 public struct DuplicateTrashOutcome: Identifiable, Sendable {
     public enum Disposition: Equatable, Sendable {
         case trashed(URL)
-        case restored(to: URL, reason: String)
         case uncertain(reason: String)
         case skipped(reason: String)
     }
@@ -52,8 +51,6 @@ extension DuplicateScanner {
                 switch disposition {
                 case .trashed:
                     removeFromResults = true
-                case .restored(let destination, _) where destination.path == candidate.url.path:
-                    removeFromResults = false
                 default:
                     removeFromResults = FileToolDisk.snapshot(at: candidate.url)?.identity != candidate.snapshot.identity
                 }
@@ -117,22 +114,10 @@ extension DuplicateScanner {
         guard let recycledInfo = FileToolDisk.entry(recycledName, in: recycledParent),
               FileIdentity(recycledInfo) == identity,
               FileToolDisk.snapshot(at: source)?.identity != identity else { return unverified }
-        if FileSnapshot(recycledInfo)?.matchesAfterRename(candidate.snapshot) == true {
-            return .trashed(recycled)
+        guard FileSnapshot(recycledInfo)?.matchesAfterRename(candidate.snapshot) == true else {
+            return .uncertain(reason: coreLocalized("The file changed while it was moved to “\(recycled.path)”. Check it in the Trash, then scan again."))
         }
-
-        do {
-            let destination = try restore(
-                recycled, from: recycledParent, matching: identity,
-                to: parent, original: source
-            )
-            let reason = destination.path == source.path
-                ? coreLocalized("The file changed during the move. Scan again before moving it to Trash.")
-                : coreLocalized("The original name was taken. Scan again before moving the restored file to Trash.")
-            return .restored(to: destination, reason: reason)
-        } catch {
-            return .uncertain(reason: coreLocalized("Could not verify recovery from “\(recycled.path)”. Check the original folder and Trash, then scan again."))
-        }
+        return .trashed(recycled)
     }
 
     private static func movedUnchanged(
@@ -142,32 +127,6 @@ extension DuplicateScanner {
               let actual = FileToolDisk.pathOfSingleLink(at: fd),
               FileToolDisk.canonicalParent(of: actual).path == recycled.path else { return false }
         return FileToolDisk.entry(source.lastPathComponent, in: parent).map(FileIdentity.init) != snapshot.identity
-    }
-
-    private static func restore(
-        _ recycled: URL, from trash: Int32, matching identity: FileIdentity,
-        to parent: Int32, original: URL
-    ) throws -> URL {
-        let parentURL = original.deletingLastPathComponent()
-        try FileToolDisk.checkDirectory(parent, at: parentURL)
-        let destination: URL
-        do {
-            try FileToolDisk.restore(recycled, from: trash, matching: identity, to: parent, at: original)
-            destination = original
-        } catch let error as NSError where error.domain == NSPOSIXErrorDomain && error.code == Int(EEXIST) {
-            // Keep the fallback under the filename length limit even if the original name was at the limit.
-            let extensionSuffix = original.pathExtension
-            let shortExtension = extensionSuffix.utf8.count <= 32 && !extensionSuffix.isEmpty ? ".\(extensionSuffix)" : ""
-            let recoveredName = "OpenToolbox Recovered \(UUID().uuidString)\(shortExtension)"
-            destination = parentURL.appending(path: recoveredName, directoryHint: .inferFromPath)
-            try FileToolDisk.checkDirectory(parent, at: parentURL)
-            try FileToolDisk.restore(recycled, from: trash, matching: identity, to: parent, at: destination)
-        }
-        try FileToolDisk.checkDirectory(parent, at: parentURL)
-        guard FileToolDisk.entry(destination.lastPathComponent, in: parent).map(FileIdentity.init) == identity else {
-            throw FileToolError.changed(destination)
-        }
-        return destination
     }
 
     private static func isUnchangedSurvivor(_ file: DuplicateFile) -> Bool {

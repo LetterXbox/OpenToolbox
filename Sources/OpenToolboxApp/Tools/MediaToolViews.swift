@@ -197,7 +197,9 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
         let session = self.session
         Task {
             try? await Task.sleep(for: .seconds(30))
-            if self.session == session, self.phase == .finishing { self.preserveUnfinished() }
+            if self.session == session, self.phase == .finishing {
+                self.failure = L("macOS is still finishing the recording. It will be saved when macOS is done.")
+            }
         }
     }
 
@@ -273,17 +275,6 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
             tool: destination.tool)
         saved = result.saved
         failure = result.failure ?? L("Recording stopped early: \(error.localizedDescription) What was recorded was saved.")
-    }
-
-    private func preserveUnfinished() {
-        defer { reset() }
-        guard let temporary else { return }
-        let kept = RecordingStore.standard().keep(
-            temporary, named: recordingName("Screen Recording", extension: "mov"), tool: "media.record-screen")
-        failure =
-            kept == temporary
-            ? L("macOS hasn't finished saving the recording. It is at \(kept.path).")
-            : L("macOS hasn't finished saving the recording, so it was kept below as it is.")
     }
 
     private func reset() {

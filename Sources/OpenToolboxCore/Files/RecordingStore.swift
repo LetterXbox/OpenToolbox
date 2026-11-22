@@ -75,12 +75,30 @@ public struct RecordingStore: Sendable {
         return folder
     }
 
-    static func identity(of name: String, in folder: Int32) -> (device: UInt64, inode: UInt64)? {
+    static func identity(of name: String, in folder: Int32) -> (device: UInt64, inode: UInt64, created: Double)? {
         var info = stat()
         guard fstatat(folder, name, &info, AT_SYMLINK_NOFOLLOW) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
             return nil
         }
-        return (UInt64(info.st_dev), UInt64(info.st_ino))
+        let created = Double(info.st_birthtimespec.tv_sec) + Double(info.st_birthtimespec.tv_nsec) / 1e9
+        return (UInt64(info.st_dev), UInt64(info.st_ino), created)
+    }
+
+    static func names(in folder: Int32) -> [String] {
+        let copy = dup(folder)
+        guard copy >= 0, let stream = fdopendir(copy) else {
+            if copy >= 0 { close(copy) }
+            return []
+        }
+        defer { closedir(stream) }
+        var result: [String] = []
+        while let entry = readdir(stream) {
+            let name = withUnsafeBytes(of: entry.pointee.d_name) { raw in
+                String(decoding: raw.prefix(Int(entry.pointee.d_namlen)), as: UTF8.self)
+            }
+            if name != ".", name != ".." { result.append(name) }
+        }
+        return result
     }
 
     /// Copies `recording` into the output folder as `name`. If that fails, moves it into the store.
@@ -114,22 +132,19 @@ public struct RecordingStore: Sendable {
 
     /// Kept recordings of `tools`, oldest first. Only regular files directly in the store count.
     public func recordings(of tools: [ToolID]) -> [Entry] {
-        tools.flatMap { tool -> [Entry] in
+        tools.flatMap { tool -> [(Entry, Double)] in
             guard let folder = try? openFolder(for: tool, create: false) else { return [] }
             defer { close(folder) }
-            let names = (try? FileManager.default.contentsOfDirectory(atPath: self.folder(for: tool).path)) ?? []
-            return names.filter { !$0.hasPrefix(".") }.compactMap { name in
-                guard let identity = Self.identity(of: name, in: folder) else { return nil }
-                return Entry(
+            return Self.names(in: folder).compactMap { name -> (Entry, Double)? in
+                guard !name.hasPrefix("."), let identity = Self.identity(of: name, in: folder) else { return nil }
+                let entry = Entry(
                     name: name, tool: tool, url: self.folder(for: tool).appending(path: name, directoryHint: .notDirectory),
                     device: identity.device, inode: identity.inode)
+                return (entry, identity.created)
             }
         }
-        .sorted {
-            let first = (try? $0.url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
-            let second = (try? $1.url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
-            return first == second ? $0.name < $1.name : first < second
-        }
+        .sorted { $0.1 == $1.1 ? $0.0.name < $1.0.name : $0.1 < $1.1 }
+        .map(\.0)
     }
 
     func verifiedFolder(for entry: Entry) throws -> Int32 {
@@ -153,10 +168,16 @@ public struct RecordingStore: Sendable {
         let saved = try output.writeNewFile(for: entry.tool, preferredName: entry.name) { destination in
             FileManager.default.createFile(atPath: destination.path, contents: nil)
             let writer = try FileHandle(forWritingTo: destination)
-            defer { try? writer.close() }
-            while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
-                try writer.write(contentsOf: chunk)
+            do {
+                while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
+                    try writer.write(contentsOf: chunk)
+                }
+                try writer.synchronize()
+            } catch {
+                try? writer.close()
+                throw error
             }
+            try writer.close()
         }
         defer { notify() }
         return SaveResult(url: saved, cleanupFailure: remove(entry, in: folder))

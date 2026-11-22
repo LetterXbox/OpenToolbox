@@ -196,6 +196,29 @@ struct UpdateTests {
         }
     }
 
+    @Test func staleWorkIsDetachedAndRemoved() async throws {
+        try await withTemporaryDirectory { root in
+            let work = root.appending(path: "work", directoryHint: .isDirectory)
+            let interrupted = work.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+            let mountRoot = interrupted.appending(path: "mount", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: mountRoot, withIntermediateDirectories: true)
+            let unrelated = work.appending(path: "keep-me", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: unrelated, withIntermediateDirectories: true)
+            let image = try await Self.makeDiskImage(in: root, version: "0.2.0")
+            let runner = SystemUpdateCommandRunner()
+            _ = try await runner.run("/usr/bin/hdiutil", arguments: [
+                "attach", "-nobrowse", "-readonly", "-noautoopen", "-mountroot", mountRoot.path, image.path,
+            ])
+
+            await UpdateInstaller(workRoot: work).removeStaleWork()
+
+            #expect(!FileManager.default.fileExists(atPath: interrupted.path))
+            #expect(FileManager.default.fileExists(atPath: unrelated.path))
+            let info = try await runner.run("/usr/bin/hdiutil", arguments: ["info"])
+            #expect(!String(decoding: info, as: UTF8.self).contains(interrupted.lastPathComponent))
+        }
+    }
+
     static func release(
         tag: String,
         prerelease: Bool = false,

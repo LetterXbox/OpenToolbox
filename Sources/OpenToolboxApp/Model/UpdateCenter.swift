@@ -38,6 +38,7 @@ final class UpdateCenter {
     private let appURL: URL
     private let installer: UpdateInstaller?
     private var task: Task<Void, Never>?
+    private var cleanup: Task<Void, Never>?
     private var timer: Timer?
 
     private static let checksKey = "UpdatesCheckAutomatically"
@@ -56,6 +57,8 @@ final class UpdateCenter {
         installer = (try? UpdateInstaller.defaultWorkRoot()).map { UpdateInstaller(workRoot: $0) }
 
         if unsupportedReason == nil { installer?.removeLeftovers(next: appURL) }
+        let installer = installer
+        cleanup = Task { await installer?.removeStaleWork() }
         timer = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.checkIfDue() }
         }
@@ -158,7 +161,9 @@ final class UpdateCenter {
         guard canInstall, let installer, !isBusy else { return }
         phase = .downloading(update, 0)
         let appURL = appURL
+        let cleanup = cleanup
         task = Task {
+            await cleanup?.value
             do {
                 let prepared = try await installer.prepare(update, replacing: appURL) { fraction in
                     Task { @MainActor in self.showProgress(fraction, for: update) }

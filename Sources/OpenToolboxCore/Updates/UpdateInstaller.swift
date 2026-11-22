@@ -136,6 +136,26 @@ public struct UpdateInstaller: Sendable {
         }
     }
 
+    /// Detaches disk images and removes downloads that an interrupted update left in the work folder.
+    public func removeStaleWork() async {
+        let root = workRoot.resolvingSymlinksInPath().path + "/"
+        if let output = try? await commands.run("/usr/bin/hdiutil", arguments: ["info", "-plist"]),
+            let plist = try? PropertyListSerialization.propertyList(from: output, format: nil) as? [String: Any],
+            let images = plist["images"] as? [[String: Any]]
+        {
+            let mounts = images.flatMap { ($0["system-entities"] as? [[String: Any]]) ?? [] }
+                .compactMap { $0["mount-point"] as? String }
+                .map { URL(fileURLWithPath: $0, isDirectory: true) }
+            for mount in mounts where mount.resolvingSymlinksInPath().path.hasPrefix(root) {
+                await detach(mount)
+            }
+        }
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: workRoot.path) else { return }
+        for name in names where UUID(uuidString: name) != nil {
+            try? FileManager.default.removeItem(at: workRoot.appending(path: name, directoryHint: .isDirectory))
+        }
+    }
+
     static func isStagedName(_ name: String) -> Bool {
         guard name.hasPrefix(stagedPrefix), name.hasSuffix(".app") else { return false }
         let id = name.dropFirst(stagedPrefix.count).dropLast(".app".count)

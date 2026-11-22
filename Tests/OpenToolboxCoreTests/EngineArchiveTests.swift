@@ -217,13 +217,13 @@ struct EngineArchiveTests {
         let task = Task {
             try await EngineProcess.run(
                 URL(fileURLWithPath: "/bin/sh"),
-                arguments: ["-c", "(trap '' TERM; sleep 30) & echo $!; wait"],
+                arguments: ["-c", "sh -c 'trap \"\" TERM; echo $$; exec sleep 30' & wait"],
                 killGraceDelay: .milliseconds(250),
                 onStdoutLine: { pidBox.append($0) }
             )
         }
         var childPID: pid_t?
-        for _ in 0..<40 {
+        for _ in 0..<80 {
             if let first = pidBox.values.first, let parsed = pid_t(first.trimmingCharacters(in: .whitespacesAndNewlines)) {
                 childPID = parsed
                 break
@@ -231,10 +231,13 @@ struct EngineArchiveTests {
             try await Task.sleep(for: .milliseconds(25))
         }
         let spawnedPID = try #require(childPID)
+        let started = ContinuousClock.now
         task.cancel()
         await #expect(throws: CancellationError.self) {
             try await task.value
         }
+        let elapsed = ContinuousClock.now - started
+        #expect(elapsed < .seconds(5))
         try await Task.sleep(for: .milliseconds(150))
         #expect(kill(spawnedPID, 0) != 0)
     }

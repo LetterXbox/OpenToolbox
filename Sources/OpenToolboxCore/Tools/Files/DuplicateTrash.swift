@@ -25,19 +25,15 @@ public struct DuplicateTrashResult: Sendable {
 
 extension DuplicateScanner {
     public static func trashSelected(_ selected: Set<URL>, in groups: [DuplicateGroup]) -> DuplicateTrashResult {
-        let manager = FileManager.default
-        return trashSelected(selected, in: groups, trashDirectory: { parent in
-            try? manager.url(for: .trashDirectory, in: .userDomainMask, appropriateFor: parent, create: false)
-        }) { source in
+        trashSelected(selected, in: groups) { source in
             var receipt: NSURL?
-            try manager.trashItem(at: source, resultingItemURL: &receipt)
+            try FileManager.default.trashItem(at: source, resultingItemURL: &receipt)
             return receipt?.filePathURL
         }
     }
 
     static func trashSelected(
         _ selected: Set<URL>, in groups: [DuplicateGroup],
-        trashDirectory: (URL) -> URL? = { _ in nil },
         trashItem: (URL) throws -> URL?
     ) -> DuplicateTrashResult {
         var outcomes: [DuplicateTrashOutcome] = []
@@ -47,8 +43,7 @@ extension DuplicateScanner {
                 let disposition: DuplicateTrashOutcome.Disposition
                 do {
                     disposition = try trash(
-                        candidate, keeping: survivors, dataHash: group.dataHash,
-                        trashDirectory: trashDirectory, using: trashItem
+                        candidate, keeping: survivors, dataHash: group.dataHash, using: trashItem
                     )
                 } catch {
                     disposition = .skipped(reason: error.localizedDescription)
@@ -72,7 +67,7 @@ extension DuplicateScanner {
 
     private static func trash(
         _ candidate: DuplicateFile, keeping survivors: [DuplicateFile], dataHash: String,
-        trashDirectory: (URL) -> URL?, using trashItem: (URL) throws -> URL?
+        using trashItem: (URL) throws -> URL?
     ) throws -> DuplicateTrashOutcome.Disposition {
         let source = candidate.url
         let parentURL = source.deletingLastPathComponent()
@@ -118,33 +113,17 @@ extension DuplicateScanner {
                 ? .trashed(recycled) : unverified
         }
         defer { close(recycledParent) }
-        guard let recycledInfo = FileToolDisk.entry(recycledName, in: recycledParent) else { return unverified }
-        let recycledIdentity = FileIdentity(recycledInfo)
-        if recycledIdentity == candidate.snapshot.identity {
-            guard FileToolDisk.snapshot(at: source)?.identity != recycledIdentity else { return unverified }
-            if FileSnapshot(recycledInfo)?.matchesAfterRename(candidate.snapshot) == true {
-                return .trashed(recycled)
-            }
-        } else {
-            // A mismatched receipt can point at an unrelated file, even inside Trash.
-            // Only use it for recovery if it came from the system Trash directory and
-            // we can still locate the reviewed inode alongside its original path.
-            guard let trashURL = trashDirectory(parentURL),
-                  let recycledParentIdentity = FileToolDisk.identity(of: recycledParent),
-                  FileToolDisk.directoryIdentity(at: FileToolDisk.canonicalDirectory(trashURL)) == recycledParentIdentity,
-                  let parentIdentity = FileToolDisk.identity(of: parent),
-                  parentIdentity != recycledParentIdentity,
-                  let actual = FileToolDisk.pathOfSingleLink(at: fd),
-                  actual.path != source.path,
-                  FileToolDisk.directoryIdentity(at: actual.deletingLastPathComponent()) == parentIdentity,
-                  FileToolDisk.entry(source.lastPathComponent, in: parent).map(FileIdentity.init)
-                    != candidate.snapshot.identity,
-                  FileToolDisk.snapshot(at: actual)?.identity == candidate.snapshot.identity else { return unverified }
+        let identity = candidate.snapshot.identity
+        guard let recycledInfo = FileToolDisk.entry(recycledName, in: recycledParent),
+              FileIdentity(recycledInfo) == identity,
+              FileToolDisk.snapshot(at: source)?.identity != identity else { return unverified }
+        if FileSnapshot(recycledInfo)?.matchesAfterRename(candidate.snapshot) == true {
+            return .trashed(recycled)
         }
 
         do {
             let destination = try restore(
-                recycled, from: recycledParent, matching: recycledIdentity,
+                recycled, from: recycledParent, matching: identity,
                 to: parent, original: source
             )
             let reason = destination.path == source.path

@@ -36,3 +36,5 @@ Release verdict for `4e0877c`: ship, with this item and the mid-export time-zone
 
 - In `DuplicateTrash`, return `.uncertain` whenever the trashed item's identity does not match the reviewed file. Drop automatic recovery of a replacement that can't be shown to belong to this operation.
 - Add a test that combines a parked original with an unrelated item at the receipt path, and assert that both Trash entries stay where they are.
+
+**Status:** done in v0.1.1 (#4). A receipt whose identity does not match the reviewed file now returns `.uncertain` with no recovery, and `trashLeavesAReplacementMovedDuringTheCallInTrash` checks that the parked original and the unrelated Trash entry both stay in place.

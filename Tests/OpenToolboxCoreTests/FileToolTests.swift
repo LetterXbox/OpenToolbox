@@ -363,7 +363,7 @@ struct DuplicateScannerTests {
             let groups = try await DuplicateScanner.scan(folders: [directory])
             let candidate = try #require(groups.first?.files.first)
             let result = DuplicateScanner.trashSelected(
-                [candidate.url], in: groups, trashDirectory: { _ in trash }
+                [candidate.url], in: groups
             ) { original in
                 try FileManager.default.moveItem(at: original, to: actual)
                 switch receipt {
@@ -401,7 +401,7 @@ struct DuplicateScannerTests {
             let groups = try await DuplicateScanner.scan(folders: [directory])
             let candidate = try #require(groups.first?.files.first)
             let result = DuplicateScanner.trashSelected(
-                [candidate.url], in: groups, trashDirectory: { _ in trash }
+                [candidate.url], in: groups
             ) { original in
                 try FileManager.default.moveItem(at: original, to: receipt)
                 if changedInTrash {
@@ -428,7 +428,7 @@ struct DuplicateScannerTests {
     }
 
     @Test(arguments: [false, true])
-    func trashRestoresAReplacementMovedDuringTheCall(originalNameTaken: Bool) async throws {
+    func trashLeavesAReplacementMovedDuringTheCallInTrash(originalNameTaken: Bool) async throws {
         try await withTemporaryDirectory { directory in
             let source = try fixture("candidate.txt", in: directory, contents: "same")
             _ = try fixture("survivor", in: directory, contents: "same")
@@ -438,9 +438,7 @@ struct DuplicateScannerTests {
             let parked = directory.appending(path: "parked", directoryHint: .notDirectory)
             let groups = try await DuplicateScanner.scan(folders: [directory])
             let candidate = try #require(groups.first?.files.first)
-            let result = DuplicateScanner.trashSelected(
-                [candidate.url], in: groups, trashDirectory: { _ in trash }
-            ) { original in
+            let result = DuplicateScanner.trashSelected([candidate.url], in: groups) { original in
                 try FileManager.default.moveItem(at: original, to: parked)
                 _ = try fixture("candidate.txt", in: directory, contents: "replacement")
                 try FileManager.default.moveItem(at: original, to: receipt)
@@ -450,21 +448,55 @@ struct DuplicateScannerTests {
                 return receipt
             }
             let outcome = try #require(result.outcomes.first)
-            guard case .restored(let restored, _) = outcome.disposition else {
-                Issue.record("Expected the replacement to be restored")
+            guard case .uncertain = outcome.disposition else {
+                Issue.record("Expected an uncertain move")
                 return
             }
-            #expect(outcome.original == candidate.url)
+            #expect(result.removedFromResults == [candidate.url])
+            let receiptContents = try String(contentsOf: receipt, encoding: .utf8)
+            let parkedContents = try String(contentsOf: parked, encoding: .utf8)
+            #expect(receiptContents == "replacement")
+            #expect(parkedContents == "same")
+            if originalNameTaken {
+                let occupant = try String(contentsOf: source, encoding: .utf8)
+                #expect(occupant == "occupant")
+            } else {
+                #expect(!FileManager.default.fileExists(atPath: source.path))
+            }
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func trashRestoresTheReviewedFileWhenItChangedDuringTheMove(originalNameTaken: Bool) async throws {
+        try await withTemporaryDirectory { directory in
+            let source = try fixture("candidate.txt", in: directory, contents: "same")
+            _ = try fixture("survivor", in: directory, contents: "same")
+            let trash = directory.appending(path: ".trash", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: false)
+            let receipt = trash.appending(path: "candidate.txt", directoryHint: .notDirectory)
+            let groups = try await DuplicateScanner.scan(folders: [directory])
+            let candidate = try #require(groups.first?.files.first)
+            let result = DuplicateScanner.trashSelected([candidate.url], in: groups) { original in
+                try FileManager.default.moveItem(at: original, to: receipt)
+                try Data("changed".utf8).write(to: receipt)
+                if originalNameTaken {
+                    _ = try fixture("candidate.txt", in: directory, contents: "occupant")
+                }
+                return receipt
+            }
+            let outcome = try #require(result.outcomes.first)
+            guard case .restored(let restored, _) = outcome.disposition else {
+                Issue.record("Expected the changed file to be restored")
+                return
+            }
             #expect(restored.deletingLastPathComponent().path == source.deletingLastPathComponent().path)
             #expect(!FileManager.default.fileExists(atPath: receipt.path))
             let restoredContents = try String(contentsOf: restored, encoding: .utf8)
-            let parkedContents = try String(contentsOf: parked, encoding: .utf8)
-            let sourceContents = try String(contentsOf: source, encoding: .utf8)
-            #expect(restoredContents == "replacement")
-            #expect(parkedContents == "same")
+            #expect(restoredContents == "changed")
             if originalNameTaken {
                 #expect(restored.path != source.path)
-                #expect(sourceContents == "occupant")
+                let occupant = try String(contentsOf: source, encoding: .utf8)
+                #expect(occupant == "occupant")
                 #expect(result.removedFromResults == [candidate.url])
             } else {
                 #expect(restored.path == source.path)

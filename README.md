@@ -22,9 +22,11 @@ An open-source, pure native macOS (Swift / SwiftUI) utility suite designed aroun
 - [ ] Release `.app` bundle built from an Xcode application target. Releases are unsigned for now: on first launch, approve the app in System Settings → Privacy & Security → **Open Anyway**.
 - [ ] Later, optional: Developer ID signing and notarization
 
-### v0.1.1 — Known v0.1 limitations to close
-- [ ] Find Duplicates → Move to Trash: report "uncertain" instead of auto-recovering when the trashed item cannot be proven to be the reviewed file (two coincident races; see `docs/reviews/resolver-trash-recovery.md`)
-- [ ] PDF exports: pin the calendar as well as the date per run, so a time-zone change mid-export cannot split outputs across two dated folders
+### v0.1.1 — Fixes
+- [x] Find Duplicates → Move to Trash: confirm the move without reading `~/.Trash`, which macOS privacy protection blocks (v0.1 reported every move as unverified)
+- [x] Find Duplicates → Move to Trash: report "uncertain" instead of auto-recovering when the trashed item cannot be proven to be the reviewed file (two coincident races; see `docs/reviews/resolver-trash-recovery.md`)
+- [x] PDF exports: pin the calendar as well as the date per run, so a time-zone change mid-export cannot split outputs across two dated folders
+- [x] Packaged app records the SDK it was built with, so macOS 26 and later draw it in the current design instead of a compatibility mode that showed a line across the scrolled sidebar
 
 ### Phase 2 — On-Demand Media & Archive Engines
 - [ ] `ffmpeg` engine — manifest schema and Engine Manager UI ready; verified builds not pinned yet (Video/Audio Compress, Convert, Trim, Mute, Extract Audio, Video to GIF, Media Info)

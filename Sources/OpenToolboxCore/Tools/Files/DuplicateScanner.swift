@@ -26,7 +26,7 @@ public struct DuplicateFile: Identifiable, Sendable {
     public var size: Int64 { snapshot.size }
     public var modificationDate: Date { snapshot.modificationDate }
 
-    fileprivate let snapshot: FileSnapshot
+    let snapshot: FileSnapshot
 
     /// Checks that an item still matches the file scanned before passing it to a file operation.
     public func isUnchanged() -> Bool {
@@ -37,12 +37,13 @@ public struct DuplicateFile: Identifiable, Sendable {
 public struct DuplicateGroup: Identifiable, Sendable {
     public let id: String
     public let files: [DuplicateFile]
+    let dataHash: String
     public var wastedBytes: Int64 { (files.first?.size ?? 0) * Int64(max(0, files.count - 1)) }
 
     public func removingFiles(at urls: Set<URL>) -> DuplicateGroup? {
         let remaining = files.filter { !urls.contains($0.url) }
         guard remaining.count > 1 else { return nil }
-        return DuplicateGroup(id: id, files: remaining)
+        return DuplicateGroup(id: id, files: remaining, dataHash: dataHash)
     }
 }
 
@@ -83,7 +84,9 @@ public enum DuplicateScanner {
                         return file.isUnchanged()
                     }
                     guard unchanged.count > 1, let size = unchanged.first?.size else { continue }
-                    let group = DuplicateGroup(id: "\(size):\(hash)", files: unchanged.sorted { $0.url.path < $1.url.path })
+                    let group = DuplicateGroup(
+                        id: "\(size):\(hash)", files: unchanged.sorted { $0.url.path < $1.url.path }, dataHash: hash
+                    )
                     matches.append(group)
                 }
             }
@@ -166,6 +169,8 @@ public enum DuplicateScanner {
                 let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
                 defer { try? handle.close() }
 
+                // The digest covers only the data fork, so any resource fork makes this file ineligible.
+                guard try !FileToolDisk.hasResourceFork(fd, at: file.url) else { continue }
                 let hash: String
                 if full {
                     let hashes = try HashGenerator.hashFile(handle, algorithms: [.sha256]) { count in

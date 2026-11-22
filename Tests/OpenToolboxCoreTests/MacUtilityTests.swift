@@ -91,14 +91,9 @@ struct MacUtilityTests {
             #expect(before == .absent)
 
             let value = Data("0083;65a0bc00;Test Agent;80DEABBB-7518-4BA4-AB89-1CDFE3AB2F7E".utf8)
-            let writeResult: Int32 = file.withUnsafeFileSystemRepresentation { path in
-                guard let path else { return -1 }
-                return value.withUnsafeBytes { buffer in
-                    setxattr(path, "com.apple.quarantine", buffer.baseAddress, buffer.count, 0, XATTR_NOFOLLOW)
-                }
-            }
-            try #require(writeResult == 0)
-            guard case .present(let record) = try QuarantineAttribute.read(at: file) else {
+            try writeQuarantine(value, to: file)
+            let inspection = try QuarantineAttribute.inspect(at: file)
+            guard case .present(let record) = inspection.status else {
                 Issue.record("Expected a quarantine attribute")
                 return
             }
@@ -107,11 +102,49 @@ struct MacUtilityTests {
             #expect(record?.agentName == "Test Agent")
             #expect(record?.eventID == "80DEABBB-7518-4BA4-AB89-1CDFE3AB2F7E")
 
-            try QuarantineAttribute.remove(at: file)
-            try QuarantineAttribute.remove(at: file)
+            try QuarantineAttribute.remove(at: file, matching: inspection)
             #expect(try QuarantineAttribute.read(at: file) == .absent)
             #expect(try Data(contentsOf: file) == Data("original contents".utf8))
         }
+    }
+
+    @Test func quarantineRemovalRejectsAReplacementWithTheSameAttribute() async throws {
+        try await withTemporaryDirectory { directory in
+            let file = directory.appending(path: "sample")
+            let original = directory.appending(path: "original")
+            let value = Data("0083;;Test Agent;".utf8)
+            try Data("first".utf8).write(to: file)
+            try writeQuarantine(value, to: file)
+            let inspection = try QuarantineAttribute.inspect(at: file)
+            try FileManager.default.moveItem(at: file, to: original)
+            try Data("replacement".utf8).write(to: file)
+            try writeQuarantine(value, to: file)
+
+            #expect(throws: (any Error).self) { try QuarantineAttribute.remove(at: file, matching: inspection) }
+            #expect(try QuarantineAttribute.read(at: file) == inspection.status)
+            #expect(try QuarantineAttribute.read(at: original) == inspection.status)
+        }
+    }
+
+    @Test func quarantineRemovalRequiresTheExactInspectedAttributeBytes() async throws {
+        try await withTemporaryDirectory { directory in
+            let file = directory.appending(path: "sample")
+            try Data("file".utf8).write(to: file)
+            try writeQuarantine(Data("0083;;Test Agent;".utf8), to: file)
+            let inspection = try QuarantineAttribute.inspect(at: file)
+            try writeQuarantine(Data("00083;;Test Agent;".utf8), to: file)
+            #expect(try QuarantineAttribute.read(at: file) == inspection.status)
+
+            #expect(throws: (any Error).self) { try QuarantineAttribute.remove(at: file, matching: inspection) }
+            #expect(try QuarantineAttribute.read(at: file) == inspection.status)
+        }
+    }
+
+    private func writeQuarantine(_ value: Data, to url: URL) throws {
+        let result = value.withUnsafeBytes {
+            setxattr(url.path, "com.apple.quarantine", $0.baseAddress, $0.count, 0, XATTR_NOFOLLOW)
+        }
+        try #require(result == 0)
     }
 
     @Test func quarantineAcceptsEmptyOptionalFieldsAndRejectsInvalidFlags() {

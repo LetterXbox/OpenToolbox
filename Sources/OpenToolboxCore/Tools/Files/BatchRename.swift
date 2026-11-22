@@ -170,11 +170,10 @@ public enum BatchRename {
         let name: String
     }
 
-    private static func conflicts(in plan: [RenamePlanItem], copying: Bool) -> [RenamePlanItem] {
-        var items = plan
-        var sensitivity: [URL: Bool] = [:]
+    private struct PathKeys {
+        private var sensitivity: [URL: Bool] = [:]
 
-        func key(_ name: String, in directory: URL) -> PathKey {
+        mutating func key(_ name: String, in directory: URL) -> PathKey {
             let caseSensitive: Bool
             if let cached = sensitivity[directory] {
                 caseSensitive = cached
@@ -200,10 +199,15 @@ public enum BatchRename {
                 name: name.folding(options: .caseInsensitive, locale: locale)
             )
         }
+    }
+
+    private static func conflicts(in plan: [RenamePlanItem], copying: Bool) -> [RenamePlanItem] {
+        var items = plan
+        var keys = PathKeys()
 
         let sources = Dictionary(grouping: items.indices.filter { items[$0].snapshot != nil }) { index in
             let file = items[index].file
-            return key(file.lastPathComponent, in: file.deletingLastPathComponent())
+            return keys.key(file.lastPathComponent, in: file.deletingLastPathComponent())
         }
         for indices in sources.values where indices.count > 1 {
             for index in indices where items[index].conflict == nil {
@@ -213,7 +217,7 @@ public enum BatchRename {
 
         let candidates = items.indices.filter { items[$0].conflict == nil }
         let targetKeys = Dictionary(uniqueKeysWithValues: candidates.map { index in
-            (index, key(items[index].newName, in: items[index].directory))
+            (index, keys.key(items[index].newName, in: items[index].directory))
         })
         for indices in Dictionary(grouping: candidates, by: { targetKeys[$0] }).values where indices.count > 1 {
             for index in indices { items[index].conflict = .duplicateTarget }
@@ -284,55 +288,109 @@ public enum BatchRename {
     private static func execute(
         _ moves: [RenameMove], total: Int, issues initialIssues: [RenameIssue], undoing: Bool
     ) -> RenameResult {
-        var steps = moves.map { RenameStep(move: $0, staging: stagingName(), current: $0.source.lastPathComponent) }
+        var steps = moves.map { RenameStep(move: $0, current: $0.source.lastPathComponent) }
         var issues = initialIssues
-
-        do {
-            for index in steps.indices {
-                let staging = steps[index].staging
-                try steps[index].move(to: staging)
-            }
-            for index in steps.indices {
-                let name = steps[index].move.target.lastPathComponent
-                try steps[index].move(to: name)
-            }
-        } catch {
-            if let error = error as? RenameIssueError {
-                issues.append(error.issue)
-            }
-
-            // Clear installed targets before restoring source names, including cycles such as A ↔ B.
-            for index in steps.indices where steps[index].atTarget {
-                let staging = steps[index].staging
-                do { try steps[index].move(to: staging) }
-                catch { if let error = error as? RenameIssueError { issues.append(error.issue) } }
-            }
-            for index in steps.indices where !steps[index].atSource {
-                let original = steps[index].move.source.lastPathComponent
-                do { try steps[index].move(to: original) }
-                catch { if let error = error as? RenameIssueError { issues.append(error.issue) } }
-            }
-
-            let recovery = steps.compactMap { step -> RenameMove? in
-                if undoing ? step.atTarget : step.atSource { return nil }
-                return RenameMove(
-                    source: step.currentURL, target: undoing ? step.move.target : step.move.source,
-                    identity: step.move.identity
+        var keys = PathKeys()
+        var sources: [PathKey: Int] = [:]
+        for (index, move) in moves.enumerated() {
+            let source = keys.key(move.source.lastPathComponent, in: move.source.deletingLastPathComponent())
+            guard sources.updateValue(index, forKey: source) == nil else {
+                issues.append(issue(for: move.source, error: RenameConflict.duplicateSource))
+                return RenameResult(
+                    completed: [], skipped: total, issues: issues, undoJournal: undoing ? journal(moves) : nil
                 )
             }
-            return RenameResult(
-                completed: undoing ? steps.filter { $0.atTarget }.map { $0.move.target } : [],
-                skipped: undoing ? recovery.count : total, issues: issues, undoJournal: journal(recovery)
+        }
+
+        let dependencies = moves.map {
+            sources[keys.key($0.target.lastPathComponent, in: $0.target.deletingLastPathComponent())]
+        }
+        var visited = Set<Int>()
+        for first in moves.indices where !visited.contains(first) {
+            var chain: [Int] = []
+            var next: Int? = first
+            while let index = next, visited.insert(index).inserted {
+                chain.append(index)
+                next = dependencies[index]
+            }
+            if next == first && chain.count > 1 {
+                executeCycle(chain, steps: &steps, issues: &issues)
+            } else {
+                // Free destinations from the end of the chain back to its head.
+                for index in chain.reversed() {
+                    do {
+                        _ = try apply(.rename(index, moves[index].target.lastPathComponent), to: &steps)
+                    } catch {
+                        issues.append(issue(for: moves[index].target, error: error))
+                        break
+                    }
+                }
+            }
+        }
+
+        let completed = steps.filter(\.atTarget).map(\.move.target)
+        let recovery = steps.compactMap { step -> RenameMove? in
+            if undoing ? step.atTarget : step.atSource { return nil }
+            return RenameMove(
+                source: step.currentURL, target: undoing ? step.move.target : step.move.source,
+                identity: step.move.identity
             )
         }
-        let reverse = moves.map { RenameMove(source: $0.target, target: $0.source, identity: $0.identity) }
         return RenameResult(
-            completed: moves.map { $0.target }, skipped: total - moves.count, issues: issues,
-            undoJournal: undoing ? nil : journal(reverse)
+            completed: completed, skipped: total - completed.count, issues: issues, undoJournal: journal(recovery)
         )
     }
 
-    fileprivate static func issue(for url: URL, error: any Error) -> RenameIssue {
+    private static func executeCycle(_ cycle: [Int], steps: inout [RenameStep], issues: inout [RenameIssue]) {
+        guard let pivot = cycle.first else { return }
+        var rollback: [RenameAction] = []
+        do {
+            // Each swap installs one file at its destination and leaves the displaced file at the pivot.
+            var displaced = pivot
+            for index in cycle.dropFirst() {
+                rollback.append(try apply(.exchange(displaced, index), to: &steps))
+                displaced = index
+            }
+            for index in cycle where !steps[index].atTarget {
+                let name = steps[index].move.target.lastPathComponent
+                rollback.append(try apply(.rename(index, name), to: &steps))
+            }
+        } catch {
+            issues.append(issue(for: steps[pivot].move.source, error: error))
+            for action in rollback.reversed() {
+                do {
+                    _ = try apply(action, to: &steps)
+                } catch {
+                    issues.append(issue(for: steps[pivot].currentURL, error: error))
+                    break
+                }
+            }
+        }
+    }
+
+    private static func apply(_ action: RenameAction, to steps: inout [RenameStep]) throws -> RenameAction {
+        let step = steps[action.sourceIndex]
+        let directory = try FileToolDisk.openDirectory(step.move.source.deletingLastPathComponent())
+        defer { close(directory) }
+        try step.verify(in: directory)
+
+        switch action {
+        case .rename(let index, let name):
+            let destination = step.move.source.deletingLastPathComponent().appending(path: name, directoryHint: .notDirectory)
+            try FileToolDisk.move(step.current, to: name, in: directory, at: destination)
+            steps[index].current = name
+            return .rename(index, step.current)
+        case .exchange(let first, let second):
+            let other = steps[second]
+            try other.verify(in: directory)
+            try FileToolDisk.exchange(step.current, with: other.current, in: directory, at: other.currentURL)
+            steps[first].current = other.current
+            steps[second].current = step.current
+            return action
+        }
+    }
+
+    private static func issue(for url: URL, error: any Error) -> RenameIssue {
         RenameIssue(file: url, message: error.localizedDescription)
     }
 
@@ -479,32 +537,28 @@ private struct RenameMove: Sendable {
     let identity: FileIdentity
 }
 
-private struct RenameIssueError: Error {
-    let issue: RenameIssue
+private enum RenameAction {
+    case rename(Int, String)
+    case exchange(Int, Int)
+
+    var sourceIndex: Int {
+        switch self {
+        case .rename(let index, _), .exchange(let index, _): index
+        }
+    }
 }
 
 private struct RenameStep {
     let move: RenameMove
-    let staging: String
     var current: String
 
     var atSource: Bool { current.utf8.elementsEqual(move.source.lastPathComponent.utf8) }
     var atTarget: Bool { current.utf8.elementsEqual(move.target.lastPathComponent.utf8) }
     var currentURL: URL { move.source.deletingLastPathComponent().appending(path: current, directoryHint: .notDirectory) }
 
-    mutating func move(to name: String) throws {
-        let directory = move.source.deletingLastPathComponent()
-        let destination = directory.appending(path: name, directoryHint: .notDirectory)
-        do {
-            let fd = try FileToolDisk.openDirectory(directory)
-            defer { close(fd) }
-            guard let entry = FileToolDisk.entry(current, in: fd), FileIdentity(entry) == move.identity else {
-                throw FileToolError.changed(currentURL)
-            }
-            try FileToolDisk.move(current, to: name, in: fd, at: destination)
-            current = name
-        } catch {
-            throw RenameIssueError(issue: BatchRename.issue(for: destination, error: error))
+    func verify(in directory: Int32) throws {
+        guard let entry = FileToolDisk.entry(current, in: directory), FileIdentity(entry) == move.identity else {
+            throw FileToolError.changed(currentURL)
         }
     }
 }

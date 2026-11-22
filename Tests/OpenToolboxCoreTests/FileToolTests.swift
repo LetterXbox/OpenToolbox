@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 
@@ -109,6 +110,82 @@ struct BatchRenameTests {
         }
     }
 
+    @Test func threeFileCycleUsesOnlyTheOriginalNamesAndCanBeUndone() async throws {
+        try await withTemporaryDirectory { directory in
+            let first = try fixture("1.txt", in: directory, contents: "first")
+            let second = try fixture("2.txt", in: directory, contents: "second")
+            let third = try fixture("3.txt", in: directory, contents: "third")
+            let plan = try BatchRename.plan(sources: [first, second, third], rules: [
+                .template("{n}", start: 2), .replace("^4$", with: "1", regex: true),
+            ])
+            let result = BatchRename.renameInPlace(plan)
+            #expect(result.issues.isEmpty)
+            #expect(try Set(FileManager.default.contentsOfDirectory(atPath: directory.path)) == ["1.txt", "2.txt", "3.txt"])
+            #expect(try String(contentsOf: first, encoding: .utf8) == "third")
+            #expect(try String(contentsOf: second, encoding: .utf8) == "first")
+            #expect(try String(contentsOf: third, encoding: .utf8) == "second")
+            let undo = BatchRename.undo(try #require(result.undoJournal))
+            #expect(undo.issues.isEmpty)
+            #expect(try String(contentsOf: first, encoding: .utf8) == "first")
+            #expect(try String(contentsOf: second, encoding: .utf8) == "second")
+            #expect(try String(contentsOf: third, encoding: .utf8) == "third")
+        }
+    }
+
+    @Test func renameChainFreesTheTailBeforeMovingItsPredecessor() async throws {
+        try await withTemporaryDirectory { directory in
+            let first = try fixture("1.txt", in: directory, contents: "first")
+            let second = try fixture("2.txt", in: directory, contents: "second")
+            let third = directory.appending(path: "3.txt")
+            let plan = try BatchRename.plan(sources: [first, second], rules: [.template("{n}", start: 2)])
+            let result = BatchRename.renameInPlace(plan)
+            #expect(result.issues.isEmpty)
+            #expect(!FileManager.default.fileExists(atPath: first.path))
+            #expect(try String(contentsOf: second, encoding: .utf8) == "first")
+            #expect(try String(contentsOf: third, encoding: .utf8) == "second")
+        }
+    }
+
+    @Test func failureKeepsCompletedRenamesAndLeavesOtherOriginalsAtTheirOldNames() async throws {
+        try await withTemporaryDirectory { directory in
+            let first = try fixture("first.txt", in: directory, contents: "first")
+            let locked = try fixture("locked.txt", in: directory, contents: "locked")
+            try #require(chflags(locked.path, UInt32(UF_IMMUTABLE)) == 0)
+            defer { _ = chflags(locked.path, 0) }
+            let plan = try BatchRename.plan(sources: [first, locked], rules: [.template("new-{n}")])
+            let result = BatchRename.renameInPlace(plan)
+            #expect(result.completed.map(\.lastPathComponent) == ["new-1.txt"])
+            #expect(result.issues.count == 1)
+            #expect(try Set(FileManager.default.contentsOfDirectory(atPath: directory.path)) == ["new-1.txt", "locked.txt"])
+            #expect(try String(contentsOf: directory.appending(path: "new-1.txt"), encoding: .utf8) == "first")
+            #expect(try String(contentsOf: locked, encoding: .utf8) == "locked")
+            let undo = BatchRename.undo(try #require(result.undoJournal))
+            #expect(undo.issues.isEmpty)
+            #expect(try String(contentsOf: first, encoding: .utf8) == "first")
+        }
+    }
+
+    @Test func failureDuringACycleRestoresTheNamesAlreadySwapped() async throws {
+        try await withTemporaryDirectory { directory in
+            let first = try fixture("1.txt", in: directory, contents: "first")
+            let second = try fixture("2.txt", in: directory, contents: "second")
+            let locked = try fixture("3.txt", in: directory, contents: "locked")
+            let separate = try fixture("extra.txt", in: directory, contents: "separate")
+            try #require(chflags(locked.path, UInt32(UF_IMMUTABLE)) == 0)
+            defer { _ = chflags(locked.path, 0) }
+            let plan = try BatchRename.plan(sources: [first, second, locked, separate], rules: [
+                .template("{n}", start: 2), .replace("^4$", with: "1", regex: true),
+            ])
+            let result = BatchRename.renameInPlace(plan)
+            #expect(result.completed.map(\.lastPathComponent) == ["5.txt"])
+            #expect(result.issues.count == 1)
+            #expect(try Set(FileManager.default.contentsOfDirectory(atPath: directory.path)) == ["1.txt", "2.txt", "3.txt", "5.txt"])
+            #expect(try String(contentsOf: first, encoding: .utf8) == "first")
+            #expect(try String(contentsOf: second, encoding: .utf8) == "second")
+            #expect(try String(contentsOf: locked, encoding: .utf8) == "locked")
+        }
+    }
+
     @Test func copySkipsNewlyOccupiedTargetsAndLeavesOriginals() async throws {
         try await withTemporaryDirectory { directory in
             let source = try fixture("source.txt", in: directory, contents: "original")
@@ -173,6 +250,100 @@ struct BatchRenameTests {
 }
 
 struct DuplicateScannerTests {
+    @Test func excludesFilesWithResourceForksEvenWhenTheirDataForksMatch() async throws {
+        try await withTemporaryDirectory { directory in
+            _ = try fixture("plain-a", in: directory, contents: "same")
+            _ = try fixture("plain-b", in: directory, contents: "same")
+            let first = try fixture("fork-a", in: directory, contents: "same")
+            let second = try fixture("fork-b", in: directory, contents: "same")
+            for (file, fork) in [(first, "one"), (second, "two")] {
+                let data = Data(fork.utf8)
+                let status = data.withUnsafeBytes {
+                    setxattr(file.path, "com.apple.ResourceFork", $0.baseAddress, $0.count, 0, XATTR_NOFOLLOW)
+                }
+                try #require(status == 0)
+            }
+            let groups = try await DuplicateScanner.scan(folders: [directory])
+            #expect(groups.map { $0.files.map(\.url.lastPathComponent) } == [["plain-a", "plain-b"]])
+        }
+    }
+
+    @Test func trashRechecksTheSurvivorForEachCandidate() async throws {
+        try await withTemporaryDirectory { directory in
+            _ = try fixture("a", in: directory, contents: "same")
+            let second = try fixture("b", in: directory, contents: "same")
+            let survivor = try fixture("c", in: directory, contents: "same")
+            let groups = try await DuplicateScanner.scan(folders: [directory])
+            let group = try #require(groups.first)
+            let candidates = Set(group.files.prefix(2).map(\.url))
+            let result = DuplicateScanner.trashSelected(candidates, in: groups) { staged in
+                #expect(staged.lastPathComponent == "a")
+                let stagingDirectory = staged.deletingLastPathComponent()
+                #expect(stagingDirectory.path != group.files[0].url.deletingLastPathComponent().path)
+                let attributes = try FileManager.default.attributesOfItem(atPath: stagingDirectory.path)
+                let permissions = try #require(attributes[.posixPermissions] as? NSNumber)
+                #expect(permissions.intValue & 0o077 == 0)
+                let receipt = directory.appending(path: "fake-trash")
+                try FileManager.default.moveItem(at: staged, to: receipt)
+                try FileManager.default.moveItem(at: survivor, to: directory.appending(path: "other-name"))
+                return receipt
+            }
+            #expect(result.moved.map(\.lastPathComponent) == ["a"])
+            #expect(result.issues.map(\.file.lastPathComponent) == ["b"])
+            #expect(try String(contentsOf: second, encoding: .utf8) == "same")
+        }
+    }
+
+    @Test func trashRestoresAStagedFileWhenTheMoveFails() async throws {
+        try await withTemporaryDirectory { directory in
+            let source = try fixture("candidate", in: directory, contents: "same")
+            _ = try fixture("survivor", in: directory, contents: "same")
+            let groups = try await DuplicateScanner.scan(folders: [directory])
+            let candidate = try #require(groups.first?.files.first)
+            let result = DuplicateScanner.trashSelected([candidate.url], in: groups) { staged in
+                #expect(!FileManager.default.fileExists(atPath: source.path))
+                #expect(try String(contentsOf: staged, encoding: .utf8) == "same")
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            #expect(result.moved.isEmpty)
+            #expect(result.issues.map(\.file) == [candidate.url])
+            #expect(try Set(FileManager.default.contentsOfDirectory(atPath: directory.path)) == ["candidate", "survivor"])
+            #expect(try String(contentsOf: source, encoding: .utf8) == "same")
+        }
+    }
+
+    @Test func trashSkipsAReplacementEvenWhenItsContentsMatch() async throws {
+        try await withTemporaryDirectory { directory in
+            let source = try fixture("candidate", in: directory, contents: "same")
+            _ = try fixture("survivor", in: directory, contents: "same")
+            let groups = try await DuplicateScanner.scan(folders: [directory])
+            let candidate = try #require(groups.first?.files.first)
+            try FileManager.default.moveItem(at: source, to: directory.appending(path: "original"))
+            _ = try fixture("candidate", in: directory, contents: "same")
+            let result = DuplicateScanner.trashSelected([candidate.url], in: groups) { _ in
+                Issue.record("The replacement reached the Trash operation")
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            #expect(result.moved.isEmpty)
+            #expect(result.issues.map(\.file) == [candidate.url])
+            #expect(try String(contentsOf: source, encoding: .utf8) == "same")
+        }
+    }
+
+    @Test func trashReportsAnUnverifiedReceiptAndRestoresTheStagedFile() async throws {
+        try await withTemporaryDirectory { directory in
+            let source = try fixture("candidate", in: directory, contents: "same")
+            let survivor = try fixture("survivor", in: directory, contents: "same")
+            let groups = try await DuplicateScanner.scan(folders: [directory])
+            let candidate = try #require(groups.first?.files.first)
+            let result = DuplicateScanner.trashSelected([candidate.url], in: groups) { _ in survivor }
+            #expect(result.moved.isEmpty)
+            #expect(result.issues.map(\.file) == [candidate.url])
+            #expect(try String(contentsOf: source, encoding: .utf8) == "same")
+            #expect(try String(contentsOf: survivor, encoding: .utf8) == "same")
+        }
+    }
+
     @Test func groupsByContentEvenWhenSizeAndPrefixAreIdentical() async throws {
         try await withTemporaryDirectory { directory in
             let prefix = String(repeating: "x", count: 65_536)

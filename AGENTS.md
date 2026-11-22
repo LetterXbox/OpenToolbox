@@ -26,5 +26,6 @@ Open-source, pure native macOS (Swift / SwiftUI, macOS 15+) utility suite with o
 
 ## Public repository
 
-- The repository is public. Public docs, PR bodies and release notes describe shipped features, known limitations and what was tested, on which platform. Plans and roadmap are kept outside the repository.
+- The repository is public. Plans and roadmap are kept outside the repository.
+- Before every release, follow `docs/RELEASING.md`: have **Gemini 4 Neon** update `README.md` (feature list, install steps, and known limitations) and write the GitHub release notes (**New features** and **Bug fixes** only). Record what was tested, and on which platform, in the release PR body.
 - Keep machine-specific paths, hostnames, IP addresses and local tool configuration out of tracked files, PR bodies and release notes.

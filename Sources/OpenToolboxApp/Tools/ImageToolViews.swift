@@ -253,6 +253,9 @@ struct BlurFacesView: View {
     @State private var faceCount: Int?
     @State private var errorText: String?
     @State private var isProcessing = false
+    @State private var isPreviewing = false
+    /// Bumped whenever the preview's inputs change, so late results can be recognized.
+    @State private var previewGeneration = 0
     @State private var results: [FileResult] = []
 
     var body: some View {
@@ -274,11 +277,11 @@ struct BlurFacesView: View {
             }
             HStack {
                 Button(L("Preview First Image"), action: makePreview)
-                    .disabled(files.isEmpty || isProcessing)
+                    .disabled(files.isEmpty || isProcessing || isPreviewing)
                 Button(L("Blur Faces in \(files.count) Images"), action: run)
                     .buttonStyle(.borderedProminent)
                     .disabled(files.isEmpty || isProcessing)
-                if isProcessing { ProgressView().controlSize(.small) }
+                if isProcessing || isPreviewing { ProgressView().controlSize(.small) }
                 Spacer()
                 if let faceCount {
                     Text(L("\(faceCount) faces found")).foregroundStyle(.secondary)
@@ -293,42 +296,52 @@ struct BlurFacesView: View {
                 .foregroundStyle(.secondary)
             FileResultsView(results: results)
         }
-        .onChange(of: style) { if preview != nil { makePreview() } }
         // A preview always describes the current first file and settings, or nothing.
+        .onChange(of: style) {
+            let hadPreview = preview != nil || isPreviewing
+            clearPreview()
+            if hadPreview { makePreview() }
+        }
         .onChange(of: files) { clearPreview() }
         .onChange(of: strength) { clearPreview() }
     }
 
+    /// Drops the current preview and orphans any preview still computing.
     private func clearPreview() {
+        previewGeneration += 1
         preview = nil
         faceCount = nil
         errorText = nil
+        isPreviewing = false
     }
 
     private func makePreview() {
         guard let url = files.first else { return }
         let style = self.style, strength = self.strength
-        isProcessing = true
-        errorText = nil
+        clearPreview()
+        let generation = previewGeneration
+        isPreviewing = true
         Task {
-            do {
-                let (box, count) = try await Task.detached(priority: .userInitiated) { () throws -> (ImageBox, Int) in
+            let outcome = await Task.detached(priority: .userInitiated) { () -> Result<(ImageBox, Int), any Error> in
+                Result {
                     let accessing = url.startAccessingSecurityScopedResource()
                     defer { if accessing { url.stopAccessingSecurityScopedResource() } }
                     let image = try ImageProcessor.loadImage(at: url).image
                     let faces = try FaceBlur.detectFaces(in: image)
                     let output = try FaceBlur.anonymize(image, regions: faces, style: style, strength: strength)
                     return (ImageBox(cgImage: output), faces.count)
-                }.value
-                // Drop a result whose inputs changed while it was computing.
-                if files.first == url, self.style == style, self.strength == strength {
-                    preview = box
-                    faceCount = count
                 }
-            } catch {
+            }.value
+            // A newer preview or a change of input superseded this one: leave its state alone.
+            guard generation == previewGeneration else { return }
+            switch outcome {
+            case .success(let (box, count)):
+                preview = box
+                faceCount = count
+            case .failure(let error):
                 errorText = error.localizedDescription
             }
-            isProcessing = false
+            isPreviewing = false
         }
     }
 

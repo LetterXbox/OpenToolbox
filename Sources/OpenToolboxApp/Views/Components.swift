@@ -13,6 +13,12 @@ func runOffMain<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
     }
 }
 
+/// Equality by exact UTF-8 bytes. Swift's `==` treats canonically equivalent strings
+/// (`é` and `e` + combining acute) as equal even though their indices differ.
+func sameBytes(_ a: String, _ b: String) -> Bool {
+    a.utf8.elementsEqual(b.utf8)
+}
+
 /// Short pause before recomputing from typed input, so work runs once typing settles.
 /// Returns `false` when the input changed again during the pause.
 func debounce() async -> Bool {

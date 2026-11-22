@@ -312,6 +312,16 @@ struct PDFToolTests {
         #expect(throws: PDFToolError.pageTooLarge) { try PDFTools.render(page, dpi: 144) }
     }
 
+    @Test func renderRefusesInvalidResolutions() throws {
+        let page = PDFPage()
+        page.setBounds(CGRect(x: 0, y: 0, width: 612, height: 792), for: .mediaBox)
+        #expect(throws: PDFToolError.pageTooLarge) { try PDFTools.render(page, dpi: -1e20) }
+        #expect(throws: PDFToolError.pageTooLarge) { try PDFTools.render(page, dpi: 0) }
+        #expect(throws: PDFToolError.pageTooLarge) { try PDFTools.render(page, dpi: .nan) }
+        let tiny = try PDFTools.render(page, dpi: 1)
+        #expect(tiny.width >= 1 && tiny.height >= 1)
+    }
+
     @Test func renderHonorsPageRotation() throws {
         let rotated = PDFTools.rotate([0], by: 90, in: try sampleDocument(pages: 1))
         let page = try #require(rotated.page(at: 0))

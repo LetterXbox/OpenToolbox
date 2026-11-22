@@ -97,28 +97,43 @@ struct OutputDirectoryTests {
         }
     }
 
+    static func utcDay() -> (date: Date, calendar: Calendar) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return (Date(timeIntervalSince1970: 1_700_000_000), calendar)  // 2023-11-14 UTC
+    }
+
     @Test func writeNewFileNeverReplacesAFileCreatedMeanwhile() async throws {
         try await withTemporaryDirectory { directory in
+            let output = OutputDirectory(baseDirectory: directory)
+            let (date, calendar) = Self.utcDay()
+            let run = try output.runDirectory(for: "image.convert", date: date, calendar: calendar)
             // Another export claims the name while this one is still encoding.
-            let url = try OutputDirectory.writeNewFile(in: directory, preferredName: "photo.png") { temporary in
-                try Data("other".utf8).write(to: directory.appending(path: "photo.png"))
+            let url = try output.writeNewFile(
+                for: "image.convert", preferredName: "photo.png", date: date, calendar: calendar
+            ) { temporary in
+                try Data("other".utf8).write(to: run.appending(path: "photo.png"))
                 try Data("mine".utf8).write(to: temporary)
             }
             #expect(url.lastPathComponent == "photo 2.png")
             #expect(try Data(contentsOf: url) == Data("mine".utf8))
-            #expect(try Data(contentsOf: directory.appending(path: "photo.png")) == Data("other".utf8))
-            let names = try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted()
+            #expect(try Data(contentsOf: run.appending(path: "photo.png")) == Data("other".utf8))
+            let names = try FileManager.default.contentsOfDirectory(atPath: run.path).sorted()
             #expect(names == ["photo 2.png", "photo.png"])
         }
     }
 
     @Test func concurrentExportsWithTheSameNameAllSurvive() async throws {
         try await withTemporaryDirectory { directory in
+            let output = OutputDirectory(baseDirectory: directory)
+            let (date, calendar) = Self.utcDay()
             let count = 16
             let urls = try await withThrowingTaskGroup(of: URL.self) { group in
                 for index in 0..<count {
                     group.addTask {
-                        try OutputDirectory.writeNewFile(in: directory, preferredName: "photo.png") {
+                        try output.writeNewFile(
+                            for: "image.convert", preferredName: "photo.png", date: date, calendar: calendar
+                        ) {
                             try Data("\(index)".utf8).write(to: $0)
                         }
                     }
@@ -134,35 +149,63 @@ struct OutputDirectoryTests {
     @Test func failedWriteLeavesNothingBehind() async throws {
         struct Failure: Error {}
         try await withTemporaryDirectory { (directory: URL) async throws -> Void in
+            let output = OutputDirectory(baseDirectory: directory)
+            let (date, calendar) = Self.utcDay()
             #expect(throws: Failure.self) {
-                try OutputDirectory.writeNewFile(in: directory, preferredName: "photo.png") { temporary in
+                try output.writeNewFile(
+                    for: "image.convert", preferredName: "photo.png", date: date, calendar: calendar
+                ) { temporary in
                     try Data("partial".utf8).write(to: temporary)
                     throw Failure()
                 }
             }
-            let leftovers = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            let run = try output.runDirectory(for: "image.convert", date: date, calendar: calendar)
+            let leftovers = try FileManager.default.contentsOfDirectory(atPath: run.path)
             #expect(leftovers.isEmpty)
         }
     }
 
-    @Test func runDirectoryRefusesSymlinkLeadingOutside() async throws {
-        try await withTemporaryDirectory { directory in
+    @Test(arguments: ["day", "tool"])
+    func linksInsideTheOutputFolderAreRefusedWithoutSideEffects(_ level: String) async throws {
+        try await withTemporaryDirectory { (directory: URL) async throws -> Void in
             let base = directory.appending(path: "out")
             let elsewhere = directory.appending(path: "elsewhere")
-            try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
-            var calendar = Calendar(identifier: .gregorian)
-            calendar.timeZone = TimeZone(identifier: "UTC")!
-            let date = Date(timeIntervalSince1970: 1_700_000_000)
-            try FileManager.default.createSymbolicLink(
-                at: base.appending(path: "2023-11-14"), withDestinationURL: elsewhere)
+            let (date, calendar) = Self.utcDay()
+            if level == "day" {
+                try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+                try FileManager.default.createSymbolicLink(
+                    at: base.appending(path: "2023-11-14"), withDestinationURL: elsewhere)
+            } else {
+                let day = base.appending(path: "2023-11-14")
+                try FileManager.default.createDirectory(at: day, withIntermediateDirectories: true)
+                try FileManager.default.createSymbolicLink(at: day.appending(path: "convert"), withDestinationURL: elsewhere)
+            }
             let output = OutputDirectory(baseDirectory: base)
+            #expect(throws: OutputDirectoryError.self) {
+                try output.runDirectory(for: "image.convert", date: date, calendar: calendar)
+            }
+            #expect(throws: OutputDirectoryError.self) {
+                try output.writeNewFile(
+                    for: "image.convert", preferredName: "photo.png", date: date, calendar: calendar
+                ) { try Data("x".utf8).write(to: $0) }
+            }
+            // Nothing was created or written through the link.
+            let outside = try FileManager.default.contentsOfDirectory(atPath: elsewhere.path)
+            #expect(outside.isEmpty)
+        }
+    }
+
+    @Test func aFileWhereTheDayFolderShouldBeIsRefused() async throws {
+        try await withTemporaryDirectory { (directory: URL) async throws -> Void in
+            let (date, calendar) = Self.utcDay()
+            try Data("x".utf8).write(to: directory.appending(path: "2023-11-14"))
+            let output = OutputDirectory(baseDirectory: directory)
             #expect(throws: OutputDirectoryError.self) {
                 try output.runDirectory(for: "image.convert", date: date, calendar: calendar)
             }
         }
     }
-
     @Test func fileNamesAreSanitized() {
         #expect(OutputDirectory.sanitizedFileName("a/b:c") == "a-b-c")
         #expect(OutputDirectory.sanitizedFileName("..") == "Untitled")

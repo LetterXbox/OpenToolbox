@@ -18,7 +18,7 @@ public enum PDFToolError: Error, Equatable, LocalizedError {
         case .invalidRange(let text): coreLocalized("“\(text)” is not a valid page range. Use forms like 1-3, 5, 8-.")
         case .writeFailed: coreLocalized("The PDF could not be saved.")
         case .empty: coreLocalized("There are no pages to save.")
-        case .pageTooLarge: coreLocalized("This page is too large to render at the chosen resolution.")
+        case .pageTooLarge: coreLocalized("This page cannot be rendered at the chosen resolution.")
         }
     }
 }
@@ -157,8 +157,9 @@ public enum PDFTools {
         let scale = dpi / 72
         let pixelWidth = ((quarterTurn ? bounds.height : bounds.width) * scale).rounded()
         let pixelHeight = ((quarterTurn ? bounds.width : bounds.height) * scale).rounded()
-        // A damaged or hostile page box must not trap the Int conversion or exhaust memory.
-        guard pixelWidth.isFinite, pixelHeight.isFinite,
+        // A damaged or hostile page box, or a bad DPI, must not trap the Int conversion or exhaust memory.
+        guard dpi.isFinite, dpi > 0, pixelWidth.isFinite, pixelHeight.isFinite,
+            pixelWidth >= 0, pixelHeight >= 0,
             pixelWidth <= maximumRenderSide, pixelHeight <= maximumRenderSide,
             pixelWidth * pixelHeight <= maximumRenderPixels
         else { throw PDFToolError.pageTooLarge }

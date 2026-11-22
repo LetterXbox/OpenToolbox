@@ -188,8 +188,7 @@ struct Checkerboard: View {
 func saveImage(
     _ box: ImageBox, named baseName: String, format: ImageFormat = .png, output: OutputDirectory, tool: ToolID
 ) throws -> URL {
-    let directory = try output.runDirectory(for: tool)
-    return try OutputDirectory.writeNewFile(in: directory, preferredName: "\(baseName).\(format.fileExtension)") {
+    try output.writeNewFile(for: tool, preferredName: "\(baseName).\(format.fileExtension)") {
         try ImageProcessor.write(box.cgImage, to: $0, format: format)
     }
 }

@@ -129,9 +129,8 @@ struct PDFOrganizeView: View {
     nonisolated static func perform(
         _ mode: Mode, files: [URL], range: String, pagesPerFile: Int, degrees: Int, output: OutputDirectory, tool: ToolID
     ) throws -> [URL] {
-        let directory = try output.runDirectory(for: tool)
         func save(_ document: PDFDocument, _ name: String) throws -> URL {
-            try OutputDirectory.writeNewFile(in: directory, preferredName: name + ".pdf") {
+            try output.writeNewFile(for: tool, preferredName: name + ".pdf") {
                 try PDFTools.write(document, to: $0)
             }
         }
@@ -269,13 +268,12 @@ struct ImagesPDFView: View {
                 defer { for (url, accessing) in scoped where accessing { url.stopAccessingSecurityScopedResource() } }
                 guard let first = inputs.first else { return [] }
                 do {
-                    let directory = try output.runDirectory(for: toolID)
                     let base = first.deletingPathExtension().lastPathComponent
                     switch mode {
                     case .imagesToPDF:
                         let cgImages = try images.map { try ImageProcessor.loadImage(at: $0).image }
                         let document = PDFTools.makePDF(fromImages: cgImages, pageSize: pageSize)
-                        let url = try OutputDirectory.writeNewFile(in: directory, preferredName: base + ".pdf") {
+                        let url = try output.writeNewFile(for: toolID, preferredName: base + ".pdf") {
                             try PDFTools.write(document, to: $0)
                         }
                         return [FileResult(source: first, output: url, error: nil)]
@@ -285,8 +283,8 @@ struct ImagesPDFView: View {
                         return try pages.compactMap { index -> FileResult? in
                             guard let page = document.page(at: index) else { return nil }
                             let image = try PDFTools.render(page, dpi: CGFloat(dpi))
-                            let url = try OutputDirectory.writeNewFile(
-                                in: directory, preferredName: "\(base) page \(index + 1).\(format.fileExtension)"
+                            let url = try output.writeNewFile(
+                                for: toolID, preferredName: "\(base) page \(index + 1).\(format.fileExtension)"
                             ) {
                                 try ImageProcessor.write(image, to: $0, format: format, quality: 0.9)
                             }

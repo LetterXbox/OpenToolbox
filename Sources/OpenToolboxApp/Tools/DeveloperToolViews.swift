@@ -8,18 +8,32 @@ struct DiffCheckerView: View {
     @State private var original = ""
     @State private var changed = ""
     @State private var options = TextDiff.Options()
-    /// Computed off the main actor whenever the inputs settle.
-    @State private var lines: [TextDiff.Line] = []
-    @State private var isComparing = false
+    /// The latest comparison, tagged with the exact input it belongs to.
+    @State private var comparison: Comparison?
+    /// The one diff currently computing. A diff cannot be interrupted, so jobs run one at a time.
+    @State private var running: Task<Comparison, Never>?
 
-    private struct Input: Equatable {
+    private struct Input: Equatable, Sendable {
         var original: String
         var changed: String
         var options: TextDiff.Options
+
+        static func == (a: Input, b: Input) -> Bool {
+            sameBytes(a.original, b.original) && sameBytes(a.changed, b.changed) && a.options == b.options
+        }
+    }
+
+    private struct Comparison: Sendable {
+        var input: Input
+        var lines: [TextDiff.Line]
+        var summary: TextDiff.Summary
+        var unified: String
     }
 
     var body: some View {
-        let summary = TextDiff.summary(of: lines)
+        let input = Input(original: original, changed: changed, options: options)
+        // Only a result for exactly the current input is summarized or copied.
+        let current = comparison.flatMap { $0.input == input ? $0 : nil }
         ToolPage(tool: tool) {
             HStack(alignment: .top, spacing: 16) {
                 Pane(L("Original")) {
@@ -35,39 +49,51 @@ struct DiffCheckerView: View {
                 Toggle(L("Ignore case"), isOn: $options.ignoreCase)
                 Toggle(L("Ignore whitespace"), isOn: $options.ignoreWhitespace)
                 Spacer()
-                if isComparing {
-                    ProgressView().controlSize(.small)
-                } else if !lines.isEmpty {
-                    if summary.isIdentical {
+                if let current {
+                    if current.lines.isEmpty {
+                        EmptyView()
+                    } else if current.summary.isIdentical {
                         Label(L("No differences"), systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                     } else {
-                        Text(L("+\(summary.added) added, −\(summary.removed) removed"))
+                        Text(L("+\(current.summary.added) added, −\(current.summary.removed) removed"))
                             .foregroundStyle(.secondary)
                     }
+                } else {
+                    ProgressView().controlSize(.small)
                 }
-                CopyButton(text: TextDiff.unifiedText(lines), label: L("Copy Diff"))
+                CopyButton(text: current?.unified ?? "", label: L("Copy Diff"))
+                    .disabled(current == nil)
             }
 
+            // While a new comparison runs, the previous one stays visible but dimmed.
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(lines) { line in
+                    ForEach(comparison?.lines ?? []) { line in
                         DiffLineRow(line: line)
                     }
                 }
             }
+            .opacity(current == nil ? 0.45 : 1)
             .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
         }
-        .task(id: Input(original: original, changed: changed, options: options)) {
-            let original = self.original, changed = self.changed, options = self.options
-            isComparing = true
+        .task(id: input) {
             guard await debounce() else { return }
-            let computed = await runOffMain { TextDiff.diff(original, changed, options: options) }
-            // A newer input replaced this task; its own run will publish.
+            // Wait for an older, uninterruptible diff instead of running two at once.
+            if let running { _ = await running.value }
             guard !Task.isCancelled else { return }
-            lines = computed
-            isComparing = false
+            let job = Task.detached(priority: .userInitiated) { () -> Comparison in
+                let lines = TextDiff.diff(input.original, input.changed, options: input.options)
+                return Comparison(
+                    input: input, lines: lines, summary: TextDiff.summary(of: lines),
+                    unified: TextDiff.unifiedText(lines))
+            }
+            running = job
+            let result = await job.value
+            if running == job { running = nil }
+            guard !Task.isCancelled else { return }
+            comparison = result
         }
     }
 }
@@ -120,31 +146,39 @@ struct RegexTesterView: View {
     @State private var text = ""
     @State private var replacement = ""
     @State private var options: RegexTester.Options = []
-    /// Computed off the main actor whenever the inputs settle.
+    /// The latest evaluation, tagged with the exact input it belongs to.
     @State private var output: Output?
-    @State private var isSearching = false
 
     /// How long one evaluation may run before it is abandoned.
     static let timeLimit: Duration = .seconds(2)
 
-    private struct Input: Equatable {
+    /// Compares text by exact bytes, so match ranges are only ever used on the string they came from.
+    private struct Input: Equatable, Sendable {
         var pattern: String
         var text: String
         var replacement: String
         var options: RegexTester.Options
+
+        static func == (a: Input, b: Input) -> Bool {
+            sameBytes(a.pattern, b.pattern) && sameBytes(a.text, b.text)
+                && sameBytes(a.replacement, b.replacement) && a.options == b.options
+        }
     }
 
     private struct Output: Sendable {
-        /// The text the match ranges belong to.
-        var text: String
+        var input: Input
         var search: Result<RegexTester.SearchResult, any Error>
+        var highlighted: AttributedString
         var replaced: String?
     }
 
     var body: some View {
-        let pattern = self.pattern, text = self.text
-        let search = output.flatMap { try? $0.search.get() }
-        let matches = output?.text == text ? (search?.matches ?? []) : []
+        let input = Input(pattern: pattern, text: text, replacement: replacement, options: options)
+        // Only a result for exactly the current input is shown or copied.
+        let current = output.flatMap { $0.input == input ? $0 : nil }
+        let search = current.flatMap { try? $0.search.get() }
+        let matches = search?.matches ?? []
+        let isSearching = !pattern.isEmpty && current == nil
         ToolPage(tool: tool) {
             TextField(L("Regular expression"), text: $pattern)
                 .textFieldStyle(.roundedBorder)
@@ -167,7 +201,7 @@ struct RegexTesterView: View {
                     }
                 }
             }
-            if !pattern.isEmpty, case .failure(let error)? = output?.search {
+            if !pattern.isEmpty, case .failure(let error)? = current?.search {
                 ErrorMessage(text: error.localizedDescription)
             }
 
@@ -177,7 +211,7 @@ struct RegexTesterView: View {
                 }
                 Pane(L("Matches")) {
                     ScrollView {
-                        Text(Self.highlighted(text, matches: matches))
+                        Text(current?.highlighted ?? AttributedString(text))
                             .font(.system(.body, design: .monospaced))
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -216,7 +250,7 @@ struct RegexTesterView: View {
                 TextField(L("Replacement ($1, ${name})"), text: $replacement)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
-                if !pattern.isEmpty, !replacement.isEmpty, let replaced = output?.replaced {
+                if !pattern.isEmpty, !replacement.isEmpty, let replaced = current?.replaced {
                     HStack(alignment: .top) {
                         CodeOutput(text: replaced).frame(maxHeight: 120)
                         CopyButton(text: replaced)
@@ -224,32 +258,33 @@ struct RegexTesterView: View {
                 }
             }
         }
-        .task(id: Input(pattern: pattern, text: text, replacement: replacement, options: options)) {
-            let pattern = self.pattern, text = self.text, replacement = self.replacement, options = self.options
-            guard !pattern.isEmpty else {
+        .task(id: input) {
+            guard !input.pattern.isEmpty else {
                 output = nil
-                isSearching = false
                 return
             }
-            isSearching = true
             guard await debounce() else { return }
             let timeLimit = Self.timeLimit
+            // Each run stops on cancellation, so a superseded run ends promptly.
             let computed = await runOffMain { () -> Output in
                 let deadline = ContinuousClock.now + timeLimit
                 let shouldStop = { Task.isCancelled || ContinuousClock.now >= deadline }
                 let search = Result<RegexTester.SearchResult, any Error> {
-                    try RegexTester.search(pattern, in: text, options: options, shouldStop: shouldStop)
+                    try RegexTester.search(input.pattern, in: input.text, options: input.options, shouldStop: shouldStop)
                 }
+                let matches = (try? search.get())?.matches ?? []
                 var replaced: String?
-                if !replacement.isEmpty, case .success = search {
+                if !input.replacement.isEmpty, case .success = search {
                     replaced = try? RegexTester.replace(
-                        pattern, in: text, with: replacement, options: options, shouldStop: shouldStop)
+                        input.pattern, in: input.text, with: input.replacement, options: input.options,
+                        shouldStop: shouldStop)
                 }
-                return Output(text: text, search: search, replaced: replaced)
+                return Output(
+                    input: input, search: search, highlighted: Self.highlighted(input.text, matches: matches),
+                    replaced: replaced)
             }
             guard !Task.isCancelled else { return }
             output = computed
-            isSearching = false
         }
     }
 
@@ -263,7 +298,8 @@ struct RegexTesterView: View {
                 }))
     }
 
-    static func highlighted(_ text: String, matches: [RegexTester.Match]) -> AttributedString {
+    /// `matches` must come from searching exactly `text`.
+    nonisolated static func highlighted(_ text: String, matches: [RegexTester.Match]) -> AttributedString {
         var result = AttributedString()
         var cursor = text.startIndex
         for match in matches where match.range.lowerBound >= cursor {

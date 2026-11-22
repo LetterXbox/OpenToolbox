@@ -174,20 +174,28 @@ public enum CSV {
         return write(rows, delimiter: delimiter)
     }
 
-    /// Object keys for a header row, all distinct. The first occurrence of each name keeps it;
-    /// later duplicates get `_2`, `_3`, … skipping any name already used anywhere in the header.
+    /// Object keys for a header row, all distinct. Literal header names are reserved first
+    /// (the first occurrence of each keeps it); blank headers then get `columnN`, and later
+    /// duplicates get `_2`, `_3`, …, always skipping names already taken.
     static func uniqueKeys(_ header: [String]) -> [String] {
-        let bases = header.enumerated().map { index, raw in raw.isEmpty ? "column\(index + 1)" : raw }
         var used = Set<String>()
-        var keys = [String?](repeating: nil, count: bases.count)
-        for (index, base) in bases.enumerated() where used.insert(base).inserted {
-            keys[index] = base
+        var keys = [String?](repeating: nil, count: header.count)
+        for (index, raw) in header.enumerated() where !raw.isEmpty && used.insert(raw).inserted {
+            keys[index] = raw
         }
-        for (index, base) in bases.enumerated() where keys[index] == nil {
-            var counter = 2
+        // Next suffix to try per base name, so repeated labels stay linear.
+        var nextSuffix: [String: Int] = [:]
+        for (index, raw) in header.enumerated() where keys[index] == nil {
+            let base = raw.isEmpty ? "column\(index + 1)" : raw
+            if raw.isEmpty, used.insert(base).inserted {
+                keys[index] = base
+                continue
+            }
+            var counter = nextSuffix[base, default: 2]
             while used.contains("\(base)_\(counter)") { counter += 1 }
             let key = "\(base)_\(counter)"
             used.insert(key)
+            nextSuffix[base] = counter + 1
             keys[index] = key
         }
         return keys.map { $0 ?? "" }

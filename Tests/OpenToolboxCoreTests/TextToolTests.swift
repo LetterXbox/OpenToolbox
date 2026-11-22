@@ -216,7 +216,13 @@ struct CSVTests {
 
     @Test func generatedKeysNeverCollideWithLiteralHeaders() throws {
         #expect(CSV.uniqueKeys(["a", "a", "a_2"]) == ["a", "a_3", "a_2"])
-        #expect(CSV.uniqueKeys(["", "column1"]) == ["column1", "column1_2"])
+        // A literal header keeps its name even when a blank header earlier would generate it.
+        #expect(CSV.uniqueKeys(["", "column1"]) == ["column1_2", "column1"])
+        #expect(CSV.uniqueKeys(["x", "x", "x", "x_3"]) == ["x", "x_2", "x_4", "x_3"])
+        // Many repeated labels stay distinct.
+        let wide = CSV.uniqueKeys(Array(repeating: "v", count: 5_000))
+        #expect(Set(wide).count == 5_000)
+        #expect(wide.last == "v_5000")
         let json = try CSV.toJSON("a,a,a_2\n1,2,3", indent: nil)
         #expect(json == #"[{"a":1,"a_3":2,"a_2":3}]"#)
     }

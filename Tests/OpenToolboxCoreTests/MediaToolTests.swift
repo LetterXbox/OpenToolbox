@@ -2,6 +2,7 @@ import AVFoundation
 import CoreGraphics
 import CoreVideo
 import Foundation
+import ImageIO
 import Testing
 
 @testable import OpenToolboxCore

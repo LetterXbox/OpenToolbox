@@ -35,10 +35,10 @@ private func saveRecording(
 }
 
 private struct UnsavedRecordingsView: View {
+    static let tools: [ToolID] = ["media.record-screen", "media.record-audio"]
+
     let output: OutputDirectory
-    let tool: ToolID
-    let revision: Int
-    @State private var recordings: [URL] = []
+    @State private var recordings: [RecordingStore.Entry] = []
     @State private var failure: String?
     @State private var isConfirmingDiscard = false
 
@@ -49,7 +49,7 @@ private struct UnsavedRecordingsView: View {
                     .foregroundStyle(.orange)
                 HStack {
                     Button(L("Save to Output Folder"), action: saveAll)
-                    Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting(recordings) }
+                    Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting(recordings.map(\.url)) }
                     Button(L("Discard…"), role: .destructive) { isConfirmingDiscard = true }
                 }
                 if let failure { ErrorMessage(text: failure) }
@@ -62,29 +62,42 @@ private struct UnsavedRecordingsView: View {
         }
         Color.clear.frame(height: 0)
             .onAppear(perform: reload)
-            .onChange(of: revision) { reload() }
+            .onReceive(NotificationCenter.default.publisher(for: RecordingStore.didChange)) { _ in reload() }
     }
 
     private func reload() {
-        recordings = RecordingStore.standard().recordings()
+        recordings = RecordingStore.standard().recordings(of: Self.tools)
     }
 
     private func saveAll() {
         let store = RecordingStore.standard()
-        failure = nil
-        for recording in recordings {
+        var problems: [String] = []
+        for entry in recordings {
             do {
-                _ = try store.save(recording, output: output, tool: tool)
+                let result = try store.save(entry, output: output)
+                if let cleanup = result.cleanupFailure {
+                    problems.append(
+                        L("\(result.url.lastPathComponent) was saved, but its kept copy couldn't be removed: \(cleanup)"))
+                }
             } catch {
-                failure = error.localizedDescription
+                problems.append("\(entry.url.lastPathComponent): \(error.localizedDescription)")
             }
         }
+        failure = problems.isEmpty ? nil : problems.joined(separator: "\n")
         reload()
     }
 
     private func discardAll() {
         let store = RecordingStore.standard()
-        for recording in recordings { try? store.discard(recording) }
+        var problems: [String] = []
+        for entry in recordings {
+            do {
+                try store.discard(entry)
+            } catch {
+                problems.append("\(entry.url.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+        failure = problems.isEmpty ? nil : problems.joined(separator: "\n")
         reload()
     }
 }
@@ -107,7 +120,6 @@ private struct ElapsedText: View {
     }
 }
 
-// MARK: - Record Screen
 
 @MainActor
 @Observable
@@ -126,7 +138,6 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
     var capturesMicrophone = false
     var failure: String?
     var saved: URL?
-    var keptRevision = 0
 
     private static var active: Set<ScreenRecorder> = []
     @ObservationIgnored private var closeRequested = false
@@ -229,10 +240,7 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
             temporary, named: recordingName("Screen Recording", extension: "mov"), output: destination.output,
             tool: destination.tool)
         saved = result.saved
-        if let message = result.failure {
-            failure = message
-            keptRevision += 1
-        }
+        if let message = result.failure { failure = message }
     }
 
     private func fail(_ error: Error) {
@@ -334,7 +342,7 @@ struct RecordScreenView: View {
                 }
             }
             if let failure = recorder.failure { ErrorMessage(text: failure) }
-            UnsavedRecordingsView(output: model.outputDirectory, tool: tool.id, revision: recorder.keptRevision)
+            UnsavedRecordingsView(output: model.outputDirectory)
             Text(L("macOS shows a recording indicator in the menu bar while OpenToolbox records."))
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -344,7 +352,6 @@ struct RecordScreenView: View {
     }
 }
 
-// MARK: - Record Audio
 
 @MainActor
 @Observable
@@ -354,7 +361,6 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     var level: Float = 0
     var failure: String?
     var saved: URL?
-    var keptRevision = 0
     @ObservationIgnored private var isClosed = false
 
     @ObservationIgnored private var recorder: AVAudioRecorder?
@@ -433,10 +439,7 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         let result = saveRecording(
             temporary, named: recordingName("Recording", extension: "m4a"), output: output, tool: tool)
         saved = result.saved
-        if let message = result.failure {
-            failure = message
-            keptRevision += 1
-        }
+        if let message = result.failure { failure = message }
     }
 
     func discard() {
@@ -495,7 +498,7 @@ struct RecordAudioView: View {
                 }
             }
             if let failure = recorder.failure { ErrorMessage(text: failure) }
-            UnsavedRecordingsView(output: model.outputDirectory, tool: tool.id, revision: recorder.keptRevision)
+            UnsavedRecordingsView(output: model.outputDirectory)
             Text(L("Recordings are saved as AAC audio in \(model.outputBaseDirectory.lastPathComponent)."))
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -506,7 +509,6 @@ struct RecordAudioView: View {
     }
 }
 
-// MARK: - Trim Audio
 
 struct TrimAudioView: View {
     @Environment(AppModel.self) private var model
@@ -530,7 +532,7 @@ struct TrimAudioView: View {
                     LabeledContent(L("Length"), value: MediaTime.format(duration))
                     timeRow(L("Start"), value: $start, text: $startText, range: 0...duration)
                     timeRow(L("End"), value: $end, text: $endText, range: 0...duration)
-                    LabeledContent(L("Kept"), value: MediaTime.format(max(0, end - start)))
+                    LabeledContent(L("Kept"), value: pendingRange.map { MediaTime.format($0.end - $0.start) } ?? "—")
                 }
                 .formStyle(.grouped)
                 .frame(maxWidth: 620, maxHeight: 250)
@@ -567,7 +569,7 @@ struct TrimAudioView: View {
                     .labelsHidden()
                     .frame(width: 90)
                     .onSubmit {
-                        if let parsed = MediaTime.parse(text.wrappedValue) {
+                        if let parsed = fieldValue(text.wrappedValue, current: value.wrappedValue) {
                             value.wrappedValue = min(max(parsed, range.lowerBound), range.upperBound)
                         }
                         text.wrappedValue = MediaTime.format(value.wrappedValue)
@@ -658,7 +660,6 @@ struct TrimAudioView: View {
     }
 }
 
-// MARK: - Extract Frames
 
 struct ExtractFramesView: View {
     enum Mode: Hashable { case every, count, times }

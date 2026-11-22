@@ -28,7 +28,6 @@ private func languageName(_ language: Locale.Language) -> String {
         ?? language.minimalIdentifier
 }
 
-// MARK: - Translate
 
 struct TranslateView: View {
     let tool: ToolDescriptor
@@ -148,7 +147,6 @@ struct TranslateView: View {
     }
 }
 
-// MARK: - Text to Speech
 
 @MainActor
 @Observable
@@ -271,7 +269,6 @@ struct TextToSpeechView: View {
     }
 }
 
-// MARK: - Transcribe
 
 struct TranscribeView: View {
     @Environment(AppModel.self) private var model
@@ -386,7 +383,6 @@ struct TranscribeView: View {
     }
 }
 
-// MARK: - Summarize
 
 struct SummarizeView: View {
     let tool: ToolDescriptor

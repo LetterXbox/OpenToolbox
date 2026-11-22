@@ -3,7 +3,6 @@ import MapKit
 import OpenToolboxCore
 import SwiftUI
 
-// MARK: - Color Picker
 
 struct ColorPickerView: View {
     let tool: ToolDescriptor
@@ -102,7 +101,6 @@ struct ColorPickerView: View {
     }
 }
 
-// MARK: - Coordinate Picker
 
 struct CoordinatePickerView: View {
     let tool: ToolDescriptor

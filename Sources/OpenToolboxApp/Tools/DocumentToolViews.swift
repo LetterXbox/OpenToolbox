@@ -6,7 +6,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WebKit
 
-// MARK: - Fill & Flatten Forms
 
 private struct FormPDFView: NSViewRepresentable {
     let document: PDFDocument
@@ -100,7 +99,6 @@ struct PDFFormsView: View {
     }
 }
 
-// MARK: - Scan Document
 
 @MainActor
 @Observable
@@ -339,7 +337,6 @@ struct ScanDocumentView: View {
     }
 }
 
-// MARK: - Web Page to PDF
 
 @MainActor
 final class WebPageRenderer: NSObject, WKNavigationDelegate {

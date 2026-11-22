@@ -4,7 +4,6 @@ import OpenToolboxCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-// MARK: - Wi-Fi Password
 
 /// Asks for Location Services, which macOS requires before it reveals Wi-Fi network names.
 @MainActor
@@ -174,7 +173,6 @@ struct WiFiPasswordView: View {
     }
 }
 
-// MARK: - Reset Permissions
 
 struct ResetPermissionsView: View {
     let tool: ToolDescriptor

@@ -282,4 +282,50 @@ struct EngineCenterTests {
         #expect(!model.isEnabled(convertVideo))
         #expect(!window.openedTools.contains(convertVideo.id))
     }
+
+    @Test func removeEngineDisablesOnlyDependentToolsWhenUninstallSucceeds() async throws {
+        let suiteName = "OpenToolbox.RemoveEngineTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let tempDir = try Self.makeTempDir("OpenToolbox-RemoveEngineTests")
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let ffmpegData = Data(repeating: 0x50, count: 2048)
+        let (ffmpeg, ffmpegURL) = Self.makeManifest(id: EngineCatalog.ffmpegID, name: "FFmpeg", payload: ffmpegData)
+        let downloader = StubEngineDownloader(payloads: [ffmpegURL: ffmpegData])
+        let store = EngineStore(rootDirectory: tempDir, downloader: downloader)
+        let center = EngineCenter(manifests: [ffmpeg], store: store)
+        center.install(ffmpeg)
+        try await Self.waitUntil { !center.isInstalling(EngineCatalog.ffmpegID) && center.status(of: EngineCatalog.ffmpegID).isInstalled }
+
+        let model = AppModel(defaults: defaults, engines: center)
+        let compressVideo = try #require(ToolCatalog.tool("media.compress-video"))
+        let muteVideo = try #require(ToolCatalog.tool("media.mute-video"))
+        let mediaInfo = try #require(ToolCatalog.tool("media.info"))
+        let jsonFormatter = try #require(ToolCatalog.tool("dev.json-formatter"))
+        model.setEnabled(true, for: [compressVideo, muteVideo, mediaInfo])
+
+        let window = WindowModel()
+        model.register(window) {}
+        window.open(.tool(compressVideo.id))
+        #expect(window.selection == .tool(compressVideo.id))
+
+        #expect(model.removeEngine(EngineCatalog.ffmpegID))
+        #expect(!center.status(of: EngineCatalog.ffmpegID).isInstalled)
+        #expect(!model.isEnabled(compressVideo))
+        #expect(!model.isEnabled(muteVideo))
+        #expect(model.isEnabled(mediaInfo))
+        #expect(model.isEnabled(jsonFormatter))
+        #expect(!window.openedTools.contains(compressVideo.id))
+        #expect(window.selection == .catalog)
+
+        let failingModel = AppModel(
+            defaults: defaults,
+            engines: EngineCenter(manifests: [ffmpeg], store: nil, storeError: "Storage unavailable")
+        )
+        failingModel.setEnabled(true, for: [muteVideo])
+        #expect(!failingModel.removeEngine(EngineCatalog.ffmpegID))
+        #expect(failingModel.isEnabled(muteVideo))
+    }
 }

@@ -239,6 +239,16 @@ final class AppModel {
         }
     }
 
+    @discardableResult
+    func removeEngine(_ id: EngineID) -> Bool {
+        guard engines.uninstall(id) else { return false }
+        let dependentTools = ToolCatalog.tools(requiring: id).filter(isEnabled)
+        if !dependentTools.isEmpty {
+            setEnabled(false, for: dependentTools)
+        }
+        return true
+    }
+
     // MARK: Output
 
     var outputDirectory: OutputDirectory {

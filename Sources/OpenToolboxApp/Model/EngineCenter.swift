@@ -178,18 +178,22 @@ final class EngineCenter {
         tasks[id]?.cancel()
     }
 
-    func uninstall(_ id: EngineID) {
+    @discardableResult
+    func uninstall(_ id: EngineID) -> Bool {
         guard let store else {
             reportError(storeErrorMessage ?? L("The engine folder is unavailable."))
-            return
+            return false
         }
+        var removed = false
         do {
             try store.uninstall(id)
+            removed = true
         } catch {
             let name = manifests.first { $0.id == id }?.displayName ?? id
             reportError(L("\(name): \(error.localizedDescription)"))
         }
         refresh()
+        return removed
     }
 
     func dismissErrors(ids: Set<UUID>) {

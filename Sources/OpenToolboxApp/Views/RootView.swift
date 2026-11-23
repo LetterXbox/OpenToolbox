@@ -143,6 +143,7 @@ struct DetailView: View {
                 if let tool = ToolCatalog.tool(id) {
                     let isShown = window.selection == .tool(id)
                     ToolHostView(tool: tool)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .environment(\.toolActivity, ToolActivity(tool: tool, window: window))
                         .opacity(isShown ? 1 : 0)
                         .allowsHitTesting(isShown)
@@ -155,6 +156,7 @@ struct DetailView: View {
             }
             if !hasActiveTool {
                 page
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .zIndex(1)
                     .layoutValue(key: DetailPageActiveKey.self, value: true)
                     .layoutValue(key: DetailPageIDKey.self, value: window.selection)
@@ -261,6 +263,7 @@ struct ToolHostView: View {
                 systemImage: tool.symbolName,
                 description: Text(L("This tool is planned for a later OpenToolbox release."))
             )
+            .padding(24)
         } else if !model.engines.allEnginesInstalled(for: tool) {
             let names = (missing.isEmpty ? tool.requiredEngines : missing.map(\.displayName)).formatted(.list(type: .and))
             ContentUnavailableView {
@@ -298,6 +301,7 @@ struct ToolHostView: View {
                 }
                 Button(L("Open Engine Manager")) { window.open(.engines) }
             }
+            .padding(24)
         } else {
             ToolViewRegistry.view(for: tool)
         }

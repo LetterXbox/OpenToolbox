@@ -125,13 +125,19 @@ private struct EngineRow: View {
             L("Remove \(manifest.displayName)?"),
             isPresented: $isConfirmingRemoval
         ) {
-            Button(L("Remove"), role: .destructive) { engines.uninstall(manifest.id) }
+            Button(L("Remove"), role: .destructive) { model.removeEngine(manifest.id) }
         } message: {
             if dependentTools.isEmpty {
                 Text(L("You can download it again later."))
+            } else if dependentTools.count == 1, let only = dependentTools.first {
+                Text(
+                    L("This will also turn off \(only.localizedTitle). You can turn it back on and download \(manifest.displayName) again later."))
+            } else if dependentTools.count <= 3 {
+                Text(
+                    L("This will also turn off \(dependentTools.map(\.localizedTitle).formatted(.list(type: .and))). You can turn them back on and download \(manifest.displayName) again later."))
             } else {
                 Text(
-                    L("\(dependentTools.map(\.localizedTitle).formatted(.list(type: .and))) will stop working until you download it again."))
+                    L("This will also turn off \(dependentTools.count) tools that use \(manifest.displayName). You can turn them back on and download it again later."))
             }
         }
     }
@@ -174,7 +180,13 @@ private struct EngineRow: View {
                 }
             case .damaged:
                 HStack {
-                    Button(L("Remove"), role: .destructive) { engines.uninstall(manifest.id) }
+                    Button(L("Remove"), role: .destructive) {
+                        if dependentTools.isEmpty {
+                            model.removeEngine(manifest.id)
+                        } else {
+                            isConfirmingRemoval = true
+                        }
+                    }
                     if engines.canDownload(manifest) {
                         Button(L("Reinstall")) { engines.install(manifest) }
                     }

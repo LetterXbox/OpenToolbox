@@ -365,10 +365,16 @@ struct DiskSpeedTests {
     @Test func refusesADifferentVolumeThanTheOneChosen() async throws {
         try await withTemporaryDirectory { directory in
             let real = try identity(of: directory)
+            #expect(real.appeared != nil)
+            #expect(try identity(of: directory) == real)
             let others = [
-                VolumeIdentity(fileSystemID: real.fileSystemID ^ 1, uuid: real.uuid, totalBytes: real.totalBytes),
-                VolumeIdentity(fileSystemID: real.fileSystemID, uuid: "00000000-0000-0000-0000-000000000000", totalBytes: real.totalBytes),
-                VolumeIdentity(fileSystemID: real.fileSystemID, uuid: real.uuid, totalBytes: real.totalBytes + 4096),
+                VolumeIdentity(fileSystemID: real.fileSystemID ^ 1, uuid: real.uuid, device: real.device, appeared: real.appeared),
+                VolumeIdentity(
+                    fileSystemID: real.fileSystemID, uuid: "00000000-0000-0000-0000-000000000000", device: real.device,
+                    appeared: real.appeared),
+                VolumeIdentity(fileSystemID: real.fileSystemID, uuid: real.uuid, device: "/dev/disk99s1", appeared: real.appeared),
+                VolumeIdentity(
+                    fileSystemID: real.fileSystemID, uuid: real.uuid, device: real.device, appeared: (real.appeared ?? 0) + 1),
             ]
             for other in others {
                 #expect(throws: DiskSpeedError.volumeChanged("Test")) {
@@ -376,6 +382,34 @@ struct DiskSpeedTests {
                         in: directory, volumeName: "Test", expected: other, bytes: Int64(megabyte), reserve: 0)
                 }
             }
+        }
+    }
+
+    @Test func aByteIdenticalCloneInTheChosenDrivesPlaceHasADifferentIdentity() async throws {
+        try await withTemporaryDirectory { root in
+            let runner = SystemUpdateCommandRunner()
+            let original = root.appending(path: "drive.dmg")
+            let clone = root.appending(path: "clone.dmg")
+            let mountPoint = root.appending(path: "mount", directoryHint: .isDirectory)
+            _ = try await runner.run("/usr/bin/hdiutil", arguments: [
+                "create", "-quiet", "-size", "16m", "-fs", "HFS+", "-volname", "Drive", original.path,
+            ])
+            try FileManager.default.copyItem(at: original, to: clone)
+            try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: true)
+            func identityWhileAttached(_ image: URL) async throws -> VolumeIdentity? {
+                _ = try await runner.run("/usr/bin/hdiutil", arguments: [
+                    "attach", "-quiet", "-readonly", "-nobrowse", "-mountpoint", mountPoint.path, image.path,
+                ])
+                let identity = DiskSpeedTest.identity(of: mountPoint)
+                _ = try await runner.run("/usr/bin/hdiutil", arguments: ["detach", "-quiet", "-force", mountPoint.path])
+                return identity
+            }
+
+            let chosen = try #require(try await identityWhileAttached(original))
+            let swapped = try #require(try await identityWhileAttached(clone))
+            #expect(swapped.uuid == chosen.uuid)
+            #expect(swapped.appeared != nil && swapped.appeared != chosen.appeared)
+            #expect(swapped != chosen)
         }
     }
 

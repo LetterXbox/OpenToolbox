@@ -184,7 +184,8 @@ final class UpdateFixture {
         let checks = checks
         return UpdateCenter(
             defaults: defaults, bundle: Bundle(url: appURL)!, installer: installer,
-            check: { _, includingTestBuilds in try await checks.answer(includingTestBuilds: includingTestBuilds) })
+            check: { _, includingTestBuilds in try await checks.answer(includingTestBuilds: includingTestBuilds) },
+            runningExecutable: .unchecked)
     }
 
     func update(_ version: String) -> AppUpdate {

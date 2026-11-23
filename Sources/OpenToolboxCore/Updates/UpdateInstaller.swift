@@ -22,6 +22,20 @@ public struct InstalledApp: Equatable, Sendable {
     let contents: BundleContents
 }
 
+/// The app bundle's identity and `Info.plist`, taken at startup, before its executable is hashed in the background.
+public struct LaunchRecord: Sendable {
+    public enum Executable: Equatable, Sendable {
+        /// The bundle's executable must contain this build of the running process.
+        case running(UUID)
+        case unchecked
+    }
+
+    let url: URL
+    let identity: FileIdentity
+    let infoPlist: String
+    let executable: Executable
+}
+
 /// SHA-256 digests of a bundle's whole main executable, every architecture included, and its `Info.plist`.
 struct BundleContents: Equatable, Sendable {
     let executable: String
@@ -90,6 +104,30 @@ public struct UpdateInstaller: Sendable {
         return InstalledApp(url: url, identity: identity, contents: contents)
     }
 
+    /// The build of the running executable, or `nil` when it can't be read.
+    public static func runningExecutable() -> LaunchRecord.Executable? {
+        MachOImage.runningUUID().map(LaunchRecord.Executable.running)
+    }
+
+    /// Takes the quick part of the launch record. Call it as early as possible at startup.
+    public static func launchRecord(at url: URL, executable: LaunchRecord.Executable) -> LaunchRecord? {
+        guard let identity = fileIdentity(at: url),
+            let data = try? Data(contentsOf: url.appending(path: "Contents/Info.plist"))
+        else { return nil }
+        return LaunchRecord(
+            url: url, identity: identity, infoPlist: HashGenerator.hash(data, algorithm: .sha256), executable: executable)
+    }
+
+    /// Hashes the executable recorded in `record`. Returns `nil` when the bundle changed since `record` was taken
+    /// or its executable is not the build that is running.
+    public static func installedApp(completing record: LaunchRecord) -> InstalledApp? {
+        guard let inspected = inspect(record.url), inspected.contents.infoPlist == record.infoPlist,
+            fileIdentity(at: record.url) == record.identity
+        else { return nil }
+        if case .running(let uuid) = record.executable, !inspected.uuids.contains(uuid) { return nil }
+        return InstalledApp(url: record.url, identity: record.identity, contents: inspected.contents)
+    }
+
     /// Downloads `update`, checks its size, SHA-256, bundle identifier, version and code signature,
     /// and copies the app next to `installed` without touching the installed copy.
     public func prepare(
@@ -142,6 +180,7 @@ public struct UpdateInstaller: Sendable {
         guard await detach(image) else {
             keepWork = true
             try? FileManager.default.removeItem(at: staged.app)
+            Self.releaseStaging(staged.app)
             throw UpdateError.installFailed(coreLocalized("The update's disk image could not be ejected."))
         }
 
@@ -185,6 +224,7 @@ public struct UpdateInstaller: Sendable {
         let displaced = InstalledApp(url: swapping, identity: installed.identity, contents: installed.contents)
         guard Self.isUnchanged(displaced) else { throw Self.restore(swapping, to: installed.url, staged: staged) }
         try? FileManager.default.removeItem(at: swapping)
+        Self.releaseStaging(staged)
     }
 
     /// Removes the staged copy of an update that will not be installed.
@@ -194,6 +234,7 @@ public struct UpdateInstaller: Sendable {
             Self.bundleInfo(at: staged)?.identifier == bundleIdentifier
         else { return }
         try? FileManager.default.removeItem(at: staged)
+        Self.releaseStaging(staged)
     }
 
     /// The shell command that waits for `pid` to exit and then opens `app`.
@@ -205,13 +246,25 @@ public struct UpdateInstaller: Sendable {
     }
 
     /// Removes staged copies left next to `installedApp` by an update that was never installed.
+    /// Copies that another running copy of OpenToolbox staged and still holds are left alone.
     public func removeLeftovers(next installedApp: URL) {
         let folder = installedApp.deletingLastPathComponent()
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return }
         for name in names where Self.isStagedName(name) {
             let candidate = folder.appending(path: name, directoryHint: .isDirectory)
-            guard Self.bundleInfo(at: candidate)?.identifier == bundleIdentifier else { continue }
+            guard Self.bundleInfo(at: candidate)?.identifier == bundleIdentifier,
+                let lease = Self.lease(file: Self.stagingLease(for: candidate))
+            else { continue }
             try? FileManager.default.removeItem(at: candidate)
+            unlink(Self.stagingLease(for: candidate).path)
+            close(lease)
+        }
+        for name in names where Self.isStagingLeaseName(name) {
+            let lease = folder.appending(path: name, directoryHint: .notDirectory)
+            let app = folder.appending(path: String(name.dropLast(".lease".count)) + ".app", directoryHint: .isDirectory)
+            guard !FileManager.default.fileExists(atPath: app.path), let descriptor = Self.lease(file: lease) else { continue }
+            unlink(lease.path)
+            close(descriptor)
         }
     }
 
@@ -219,6 +272,16 @@ public struct UpdateInstaller: Sendable {
     /// Work folders that another running copy of OpenToolbox still holds are left alone.
     public func removeStaleWork() async {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: workRoot.path) else { return }
+        for name in names where Self.isPendingName(name) {
+            let folder = workRoot.appending(path: name, directoryHint: .isDirectory)
+            let modified = (try? folder.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            guard let modified, Date().timeIntervalSince(modified) > Self.pendingGrace,
+                let lease = Self.lease(folder)
+            else { continue }
+            try? FileManager.default.removeItem(at: folder)
+            close(lease)
+        }
+
         var leased: [(folder: URL, lease: Int32)] = []
         for name in names where UUID(uuidString: name) != nil {
             let folder = workRoot.appending(path: name, directoryHint: .isDirectory)
@@ -228,12 +291,11 @@ public struct UpdateInstaller: Sendable {
         guard !leased.isEmpty, let images = await Self.attachedImages(commands) else { return }
 
         var kept = Set<URL>()
-        for image in images {
-            guard let entry = leased.first(where: { entry in
-                let prefix = Self.resolved(entry.folder.path) + "/"
-                return image.path.hasPrefix(prefix) || image.mountPoints.contains { $0.hasPrefix(prefix) }
-            }) else { continue }
-            if !(await detach(URL(fileURLWithPath: image.path))) { kept.insert(entry.folder) }
+        for entry in leased {
+            let prefix = Self.resolved(entry.folder.path) + "/"
+            let isInside: @Sendable (AttachedImage) -> Bool = { $0.isInside(prefix) }
+            guard images.contains(where: isInside) else { continue }
+            if !(await Self.detach(commands, where: isInside)) { kept.insert(entry.folder) }
         }
         for entry in leased where !kept.contains(entry.folder) {
             try? FileManager.default.removeItem(at: entry.folder)
@@ -241,9 +303,46 @@ public struct UpdateInstaller: Sendable {
     }
 
     static func isStagedName(_ name: String) -> Bool {
-        guard name.hasPrefix(stagedPrefix), name.hasSuffix(".app") else { return false }
-        let id = name.dropFirst(stagedPrefix.count).dropLast(".app".count)
+        isStagedName(name, suffix: ".app")
+    }
+
+    static func isStagingLeaseName(_ name: String) -> Bool {
+        isStagedName(name, suffix: ".lease")
+    }
+
+    private static func isStagedName(_ name: String, suffix: String) -> Bool {
+        guard name.hasPrefix(stagedPrefix), name.hasSuffix(suffix) else { return false }
+        let id = name.dropFirst(stagedPrefix.count).dropLast(suffix.count)
         return UUID(uuidString: String(id)) != nil
+    }
+
+    static func isPendingName(_ name: String) -> Bool {
+        name.hasPrefix(".pending-") && UUID(uuidString: String(name.dropFirst(".pending-".count))) != nil
+    }
+
+    static let pendingGrace: TimeInterval = 10 * 60
+
+    /// The lock file that marks `staged` as held by the running copy of OpenToolbox that staged it.
+    static func stagingLease(for staged: URL) -> URL {
+        staged.deletingLastPathComponent().appending(
+            path: staged.deletingPathExtension().lastPathComponent + ".lease", directoryHint: .notDirectory)
+    }
+
+    private static let stagingLock = NSLock()
+    nonisolated(unsafe) private static var heldStagings: [String: Int32] = [:]
+
+    static func holdStaging(_ staged: URL) -> Bool {
+        let path = stagingLease(for: staged).path
+        guard let descriptor = lease(file: stagingLease(for: staged)) else { return false }
+        stagingLock.withLock { heldStagings[path] = descriptor }
+        return true
+    }
+
+    static func releaseStaging(_ staged: URL) {
+        let path = stagingLease(for: staged).path
+        guard let descriptor = stagingLock.withLock({ heldStagings.removeValue(forKey: path) }) else { return }
+        unlink(path)
+        close(descriptor)
     }
 
     static func bundleInfo(at app: URL) -> (identifier: String, version: AppVersion?, versionString: String?)? {
@@ -263,22 +362,35 @@ public struct UpdateInstaller: Sendable {
     }
 
     static func contents(of app: URL) -> BundleContents? {
+        inspect(app)?.contents
+    }
+
+    /// The bundle's contents and the build identifiers of its executable, read from one open file.
+    static func inspect(_ app: URL) -> (contents: BundleContents, uuids: [UUID])? {
         let plist = app.appending(path: "Contents/Info.plist")
         guard let data = try? Data(contentsOf: plist),
             let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
             let name = info["CFBundleExecutable"] as? String, !name.isEmpty, !name.contains("/")
         else { return nil }
-        let executable = app.appending(path: "Contents/MacOS/\(name)")
+        let descriptor = open(app.appending(path: "Contents/MacOS/\(name)").path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else { return nil }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         var status = stat()
-        guard lstat(executable.path, &status) == 0, status.st_mode & S_IFMT == S_IFREG,
-            let digest = try? HashGenerator.hashFile(at: executable, algorithm: .sha256)
+        guard fstat(descriptor, &status) == 0, status.st_mode & S_IFMT == S_IFREG else { return nil }
+        let uuids = MachOImage.uuids(of: handle)
+        guard (try? handle.seek(toOffset: 0)) != nil,
+            let digest = (try? HashGenerator.hashFile(handle, algorithms: [.sha256]) { _ in })?[.sha256]
         else { return nil }
-        return BundleContents(executable: digest, infoPlist: HashGenerator.hash(data, algorithm: .sha256))
+        return (BundleContents(executable: digest, infoPlist: HashGenerator.hash(data, algorithm: .sha256)), uuids)
     }
 
     /// Takes an exclusive, non-blocking lock on `folder`, held until the returned descriptor is closed.
     static func lease(_ folder: URL) -> Int32? {
-        let descriptor = open(folder.appending(path: ".lease").path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        lease(file: folder.appending(path: ".lease"))
+    }
+
+    static func lease(file: URL) -> Int32? {
+        let descriptor = open(file.path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard descriptor >= 0 else { return nil }
         guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
             close(descriptor)
@@ -339,10 +451,22 @@ public struct UpdateInstaller: Sendable {
         return Self.codeHash(of: app) == prepared.codeHash
     }
 
+    static var usesDiskutilImage: Bool {
+        if #available(macOS 27, *) { true } else { false }
+    }
+
     private func attach(_ image: URL, under mountRoot: URL) async throws -> URL {
         let commands = commands
         let output = try await Task.detached {
-            try await commands.run("/usr/bin/hdiutil", arguments: [
+            if Self.usesDiskutilImage {
+                let mountPoint = mountRoot.appending(path: "OpenToolbox", directoryHint: .isDirectory)
+                if let output = try? await commands.run("/usr/sbin/diskutil", arguments: [
+                    "image", "attach", "--readOnly", "--nobrowse", "--mountPoint", mountPoint.path, "--plist", image.path,
+                ]) {
+                    return output
+                }
+            }
+            return try await commands.run("/usr/bin/hdiutil", arguments: [
                 "attach", "-nobrowse", "-readonly", "-noautoopen", "-mountroot", mountRoot.path, "-plist", image.path,
             ])
         }.value
@@ -358,27 +482,49 @@ public struct UpdateInstaller: Sendable {
         return mountPoint
     }
 
-    /// Detaches `image` if it is attached, looking up its current device before each attempt.
-    /// Returns whether the image is no longer attached.
+    /// Detaches `image` if it is attached, together with any image mounted inside its work folder
+    /// that macOS lists without a path. Returns whether none of them is still attached.
     private func detach(_ image: URL) async -> Bool {
-        let commands = commands
         let target = Self.resolved(image.path)
-        return await Task.detached {
-            for arguments in [["detach"], ["detach", "-force"]] {
+        let folder = Self.resolved(image.deletingLastPathComponent().path) + "/"
+        return await Self.detach(commands) { $0.path == target || ($0.path == nil && $0.isInside(folder)) }
+    }
+
+    /// Detaches every attached image that `matches` selects, looking up its current device before each attempt.
+    /// Returns whether none of them is still attached.
+    private static func detach(
+        _ commands: UpdateCommandRunner, where matches: @escaping @Sendable (AttachedImage) -> Bool
+    ) async -> Bool {
+        await Task.detached {
+            for attempt in Self.detachAttempts {
                 guard let images = await Self.attachedImages(commands) else { return false }
-                guard let image = images.first(where: { $0.path == target }) else { return true }
-                guard let device = image.device else { return false }
-                _ = try? await commands.run("/usr/bin/hdiutil", arguments: arguments + [device])
+                let matching = images.filter(matches)
+                if matching.isEmpty { return true }
+                for image in matching {
+                    guard let device = image.device else { return false }
+                    _ = try? await commands.run(attempt.executable, arguments: attempt.arguments + [device])
+                }
             }
             guard let images = await Self.attachedImages(commands) else { return false }
-            return !images.contains { $0.path == target }
+            return !images.contains(where: matches)
         }.value
     }
 
-    private struct AttachedImage: Sendable {
-        let path: String
+    private static var detachAttempts: [(executable: String, arguments: [String])] {
+        if usesDiskutilImage {
+            return [("/usr/sbin/diskutil", ["eject"]), ("/usr/bin/hdiutil", ["detach", "-force"])]
+        }
+        return [("/usr/bin/hdiutil", ["detach"]), ("/usr/bin/hdiutil", ["detach", "-force"])]
+    }
+
+    struct AttachedImage: Sendable {
+        let path: String?
         let device: String?
         let mountPoints: [String]
+
+        func isInside(_ folder: String) -> Bool {
+            path?.hasPrefix(folder) == true || mountPoints.contains { $0.hasPrefix(folder) }
+        }
     }
 
     private static func attachedImages(_ commands: UpdateCommandRunner) async -> [AttachedImage]? {
@@ -387,11 +533,11 @@ public struct UpdateInstaller: Sendable {
             let images = plist["images"] as? [[String: Any]]
         else { return nil }
         return images.compactMap { image in
-            guard let path = image["image-path"] as? String else { return nil }
             let entities = (image["system-entities"] as? [[String: Any]]) ?? []
-            return AttachedImage(
-                path: resolved(path), device: entities.first?["dev-entry"] as? String,
-                mountPoints: entities.compactMap { $0["mount-point"] as? String }.map(resolved))
+            let mountPoints = entities.compactMap { $0["mount-point"] as? String }.map(resolved)
+            let path = (image["image-path"] as? String).map(resolved)
+            guard path != nil || !mountPoints.isEmpty else { return nil }
+            return AttachedImage(path: path, device: entities.first?["dev-entry"] as? String, mountPoints: mountPoints)
         }
     }
 
@@ -399,17 +545,19 @@ public struct UpdateInstaller: Sendable {
     static func resolved(_ path: String) -> String {
         var existing = URL(fileURLWithPath: path).standardizedFileURL
         var rest: [String] = []
-        while existing.path != "/" {
+        while true {
             if let real = realpath(existing.path, nil) {
                 defer { free(real) }
                 return rest.reversed().reduce(URL(fileURLWithPath: String(cString: real))) {
                     $0.appending(path: $1)
                 }.path
             }
+            guard existing.path != "/" else {
+                return rest.reversed().reduce(existing) { $0.appending(path: $1) }.path
+            }
             rest.append(existing.lastPathComponent)
             existing.deleteLastPathComponent()
         }
-        return path
     }
 
     private func stage(from mountPoint: URL, version: AppVersion, next installedApp: URL) async throws
@@ -432,10 +580,14 @@ public struct UpdateInstaller: Sendable {
 
         let staged = installedApp.deletingLastPathComponent()
             .appending(path: "\(Self.stagedPrefix)\(UUID().uuidString).app", directoryHint: .isDirectory)
+        guard Self.holdStaging(staged) else {
+            throw UpdateError.installFailed(coreLocalized("The update's copy next to OpenToolbox could not be locked."))
+        }
         do {
             _ = try await commands.run("/usr/bin/ditto", arguments: [source.path, staged.path])
         } catch {
             try? FileManager.default.removeItem(at: staged)
+            Self.releaseStaging(staged)
             throw error
         }
         return (staged, codeHash, contents)

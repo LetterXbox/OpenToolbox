@@ -105,7 +105,8 @@ final class UpdateCenter {
         defaults: UserDefaults = .standard,
         bundle: Bundle = .main,
         installer: (any UpdateInstalling)? = (try? UpdateInstaller.defaultWorkRoot()).map { UpdateInstaller(workRoot: $0) },
-        check: @escaping UpdateCheck = UpdateCenter.liveCheck
+        check: @escaping UpdateCheck = UpdateCenter.liveCheck,
+        runningExecutable: LaunchRecord.Executable? = UpdateInstaller.runningExecutable()
     ) {
         self.defaults = defaults
         self.check = check
@@ -120,12 +121,12 @@ final class UpdateCenter {
         lastAutomaticAttempt = defaults.object(forKey: Self.lastAutomaticAttemptKey) as? Date
         self.installer = installer
 
+        let record = unsupportedReason == nil
+            ? runningExecutable.flatMap { UpdateInstaller.launchRecord(at: appURL, executable: $0) } : nil
         if unsupportedReason == nil { installer?.removeLeftovers(next: appURL) }
         let installer = installer
-        let appURL = appURL
-        let supported = unsupportedReason == nil
         launchRecord = Task.detached {
-            let installed = supported ? UpdateInstaller.installedApp(at: appURL) : nil
+            let installed = record.flatMap(UpdateInstaller.installedApp(completing:))
             await installer?.removeStaleWork()
             return installed
         }

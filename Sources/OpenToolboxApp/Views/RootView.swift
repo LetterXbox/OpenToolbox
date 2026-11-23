@@ -7,7 +7,18 @@ struct RootView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var window = WindowModel()
 
+    private struct PresentedEngineError {
+        let ids: Set<UUID>
+        let message: String
+    }
+
+    private var presentedError: PresentedEngineError? {
+        guard let message = model.engines.errorMessage else { return nil }
+        return PresentedEngineError(ids: model.engines.activeErrorIDs, message: message)
+    }
+
     var body: some View {
+        let currentAlert = presentedError
         NavigationSplitView {
             SidebarView()
         } detail: {
@@ -42,14 +53,18 @@ struct RootView: View {
         .alert(
             L("Engine error"),
             isPresented: Binding(
-                get: { model.engines.errorMessage != nil },
-                set: { if !$0 { model.engines.errorMessage = nil } }
+                get: { currentAlert != nil },
+                set: {
+                    if !$0, let ids = currentAlert?.ids {
+                        model.engines.dismissErrors(ids: ids)
+                    }
+                }
             ),
-            presenting: model.engines.errorMessage
-        ) { _ in
-            Button(L("OK")) { model.engines.errorMessage = nil }
-        } message: { message in
-            Text(message)
+            presenting: currentAlert
+        ) { presented in
+            Button(L("OK")) { model.engines.dismissErrors(ids: presented.ids) }
+        } message: { presented in
+            Text(presented.message)
         }
         .onChange(of: updates.windowRequest) {
             if updates.takeWindowRequest() { openWindow(id: SoftwareUpdateWindow.id) }
@@ -128,6 +143,7 @@ struct DetailView: View {
                 if let tool = ToolCatalog.tool(id) {
                     let isShown = window.selection == .tool(id)
                     ToolHostView(tool: tool)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .environment(\.toolActivity, ToolActivity(tool: tool, window: window))
                         .opacity(isShown ? 1 : 0)
                         .allowsHitTesting(isShown)
@@ -140,6 +156,7 @@ struct DetailView: View {
             }
             if !hasActiveTool {
                 page
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .zIndex(1)
                     .layoutValue(key: DetailPageActiveKey.self, value: true)
                     .layoutValue(key: DetailPageIDKey.self, value: window.selection)
@@ -231,7 +248,6 @@ private struct DetailDeckLayout: Layout {
     }
 }
 
-/// Shows a tool's view, or explains what it still needs.
 struct ToolHostView: View {
     @Environment(AppModel.self) private var model
     @Environment(WindowModel.self) private var window
@@ -239,20 +255,53 @@ struct ToolHostView: View {
 
     var body: some View {
         let missing = model.engines.missingEngines(for: tool)
+        let installing = missing.filter { model.engines.isInstalling($0.id) }
+        let downloadable = model.engines.downloadableMissingEngines(for: [tool])
         if tool.availability == .planned {
             ContentUnavailableView(
                 tool.localizedTitle,
                 systemImage: tool.symbolName,
                 description: Text(L("This tool is planned for a later OpenToolbox release."))
             )
-        } else if !missing.isEmpty {
+            .padding(24)
+        } else if !model.engines.allEnginesInstalled(for: tool) {
+            let names = (missing.isEmpty ? tool.requiredEngines : missing.map(\.displayName)).formatted(.list(type: .and))
             ContentUnavailableView {
                 Label(tool.localizedTitle, systemImage: tool.symbolName)
             } description: {
-                Text(L("This tool needs \(missing.map(\.displayName).formatted(.list(type: .and))), which is downloaded on demand."))
+                VStack(spacing: 10) {
+                    if let storeError = model.engines.storeErrorMessage {
+                        Text(storeError)
+                    } else if !installing.isEmpty {
+                        let installingNames = installing.map(\.displayName).formatted(.list(type: .and))
+                        Text(L("Downloading \(installingNames)…"))
+                        if let fraction = model.engines.downloadProgress(for: tool) {
+                            ProgressView(value: fraction)
+                                .frame(maxWidth: 260)
+                        }
+                    } else {
+                        Text(L("This tool needs \(names), which is downloaded on demand."))
+                    }
+                }
             } actions: {
+                if !downloadable.isEmpty {
+                    let size = model.engines.downloadSize(of: downloadable).formatted(.byteCount(style: .file))
+                    let downloadNames = downloadable.map(\.displayName).formatted(.list(type: .and))
+                    Button(L("Download \(downloadNames) (\(size))")) {
+                        model.engines.install(downloadable)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                if !installing.isEmpty {
+                    Button(L("Cancel")) {
+                        for manifest in installing {
+                            model.engines.cancelInstall(manifest.id)
+                        }
+                    }
+                }
                 Button(L("Open Engine Manager")) { window.open(.engines) }
             }
+            .padding(24)
         } else {
             ToolViewRegistry.view(for: tool)
         }
@@ -305,8 +354,31 @@ enum ToolViewRegistry {
         case "pdf.forms": PDFFormsView(tool: tool)
         case "pdf.scan": ScanDocumentView(tool: tool)
         case "pdf.web": WebPageToPDFView(tool: tool)
+        case "pdf.compress": CompressPDFView(tool: tool)
+        case "pdf.markdown": MarkdownToPDFView(tool: tool)
+        case "pdf.word": OfficeToPDFView(tool: tool, kind: .word)
+        case "pdf.powerpoint": OfficeToPDFView(tool: tool, kind: .powerpoint)
+        case "pdf.excel": OfficeToPDFView(tool: tool, kind: .excel)
+        case "docs.convert": ConvertDocumentsView(tool: tool)
+        case "files.archive": ArchiveToolView(tool: tool)
         case "files.batch-rename": BatchRenameView(tool: tool)
         case "files.duplicates": FindDuplicatesView(tool: tool)
+        case "media.compress-video": CompressVideoView(tool: tool)
+        case "media.convert": ConvertVideoView(tool: tool)
+        case "media.resize-video": ResizeVideoView(tool: tool)
+        case "media.crop-rotate-video": CropRotateVideoView(tool: tool)
+        case "media.trim-video": TrimVideoView(tool: tool)
+        case "media.merge-videos": MergeVideosView(tool: tool)
+        case "media.mute-video": MuteVideoView(tool: tool)
+        case "media.replace-audio": ReplaceAudioView(tool: tool)
+        case "media.change-speed": ChangeVideoSpeedView(tool: tool)
+        case "media.video-to-gif": VideoToGIFView(tool: tool)
+        case "media.burn-subtitles": BurnSubtitlesView(tool: tool)
+        case "media.info": MediaInfoView(tool: tool)
+        case "media.convert-audio": ConvertAudioView(tool: tool)
+        case "media.extract-audio": ExtractAudioView(tool: tool)
+        case "media.clean-audio": CleanAudioView(tool: tool)
+        case "media.download": DownloadVideoView(tool: tool)
         case "mac.keep-awake": KeepAwakeView(tool: tool)
         case "mac.battery": BatteryHealthView(tool: tool)
         case "mac.network-speed": NetworkSpeedTestView(tool: tool)

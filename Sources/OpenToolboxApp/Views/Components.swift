@@ -36,6 +36,7 @@ struct ToolPage<Content: View>: View {
                 Image(systemName: tool.symbolName)
                     .font(.title2)
                     .foregroundStyle(Color.accentColor)
+                    .frame(width: 34, height: 32)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(tool.localizedTitle).font(.title2.weight(.semibold))
                     Text(tool.localizedSummary).foregroundStyle(.secondary)

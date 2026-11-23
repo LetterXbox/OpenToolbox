@@ -87,6 +87,37 @@ public struct OutputDirectory: Sendable {
         throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: runURL.appending(path: name).path])
     }
 
+    /// Creates a new folder in the tool's dated output folder without replacing an existing
+    /// entry, and returns its URL.
+    public func writeNewDirectory(
+        for tool: ToolID,
+        preferredName: String,
+        date: Date = Date(),
+        calendar: Calendar = .current,
+        populate: (URL) throws -> Void
+    ) throws -> URL {
+        let name = Self.sanitizedFileName(preferredName)
+        let directory = try openRunDirectory(for: tool, date: date, calendar: calendar)
+        defer { close(directory) }
+        let staging = try FileManager.default.url(
+            for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: baseDirectory, create: true)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        let temporary = staging.appending(path: name, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: false)
+        try populate(temporary)
+
+        let runURL = directoryURL(for: tool, date: date, calendar: calendar)
+        for counter in 1...Self.maximumNumberedNames {
+            let candidate = counter == 1 ? name : Self.numberedName(name, counter)
+            if renameatx_np(AT_FDCWD, temporary.path, directory, candidate, UInt32(RENAME_EXCL)) == 0 {
+                return runURL.appending(path: candidate, directoryHint: .isDirectory)
+            }
+            let code = errno
+            guard code == EEXIST else { throw Self.posixError(code, runURL.appending(path: candidate)) }
+        }
+        throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: runURL.appending(path: name).path])
+    }
+
     /// Writes a processed copy of `source` into the tool's dated folder and returns its URL.
     /// The result never replaces `source` or any other existing file.
     public func writeOutput(

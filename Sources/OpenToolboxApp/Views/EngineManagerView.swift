@@ -13,6 +13,11 @@ struct EngineManagerView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(L("Engines are external open-source programs that some tools need. They are downloaded only when you install them, verified with SHA-256, shared by every tool that uses them, and can be removed at any time."))
                         .foregroundStyle(.secondary)
+                    if let storeError = engines.storeErrorMessage {
+                        Text(storeError)
+                            .font(.callout)
+                            .foregroundStyle(.red)
+                    }
                     HStack {
                         Text(L("Using \(engines.totalDiskUsage.formatted(.byteCount(style: .file))) on disk"))
                             .font(.callout)
@@ -36,6 +41,20 @@ struct EngineManagerView: View {
         }
         .navigationTitle(L("Engines"))
         .toolbar {
+            let needed = engines.downloadableMissingEngines(for: model.activeTools)
+            let allMissing = engines.downloadableMissingEngines()
+            if !needed.isEmpty {
+                let size = engines.downloadSize(of: needed).formatted(.byteCount(style: .file))
+                Button(L("Download Needed (\(size))")) {
+                    engines.install(needed)
+                }
+                .buttonStyle(.borderedProminent)
+            } else if !allMissing.isEmpty {
+                let size = engines.downloadSize(of: allMissing).formatted(.byteCount(style: .file))
+                Button(L("Download All (\(size))")) {
+                    engines.install(allMissing)
+                }
+            }
             Button {
                 engines.refresh()
             } label: {
@@ -106,13 +125,19 @@ private struct EngineRow: View {
             L("Remove \(manifest.displayName)?"),
             isPresented: $isConfirmingRemoval
         ) {
-            Button(L("Remove"), role: .destructive) { engines.uninstall(manifest.id) }
+            Button(L("Remove"), role: .destructive) { model.removeEngine(manifest.id) }
         } message: {
             if dependentTools.isEmpty {
                 Text(L("You can download it again later."))
+            } else if dependentTools.count == 1, let only = dependentTools.first {
+                Text(
+                    L("This will also turn off \(only.localizedTitle). You can turn it back on and download \(manifest.displayName) again later."))
+            } else if dependentTools.count <= 3 {
+                Text(
+                    L("This will also turn off \(dependentTools.map(\.localizedTitle).formatted(.list(type: .and))). You can turn them back on and download \(manifest.displayName) again later."))
             } else {
                 Text(
-                    L("\(dependentTools.map(\.localizedTitle).formatted(.list(type: .and))) will stop working until you download it again."))
+                    L("This will also turn off \(dependentTools.count) tools that use \(manifest.displayName). You can turn them back on and download it again later."))
             }
         }
     }
@@ -155,8 +180,14 @@ private struct EngineRow: View {
                 }
             case .damaged:
                 HStack {
-                    Button(L("Remove"), role: .destructive) { engines.uninstall(manifest.id) }
-                    if manifest.artifact() != nil {
+                    Button(L("Remove"), role: .destructive) {
+                        if dependentTools.isEmpty {
+                            model.removeEngine(manifest.id)
+                        } else {
+                            isConfirmingRemoval = true
+                        }
+                    }
+                    if engines.canDownload(manifest) {
                         Button(L("Reinstall")) { engines.install(manifest) }
                     }
                 }

@@ -269,6 +269,18 @@ public final class EngineStore: Sendable {
                 try checkpoint(.didExtractChunk)
                 try Task.checkCancellation()
             }
+        case .tarXz:
+            try EngineTarXZ.extract(download, size: actualSize, into: files) {
+                try checkpoint(.didExtractChunk)
+                try Task.checkCancellation()
+            }
+        case .pkg(let payloadPath, _, let includedPrefixes):
+            try EnginePKG.extract(
+                download, size: actualSize, payloadPath: payloadPath, includedPrefixes: includedPrefixes, into: files
+            ) {
+                try checkpoint(.didExtractChunk)
+                try Task.checkCancellation()
+            }
         }
         let executable: FileHandle
         do {

@@ -5,7 +5,7 @@ Open-source, pure native macOS (Swift / SwiftUI, macOS 15+) utility suite with o
 ## Language and license
 
 - Write all repo docs, comments, commit messages and default UI strings in **English**. Keep UI strings ready for `Localizable.xcstrings` localization (`L("…")` in the app, `coreLocalized("…")` in the core).
-- License: **GPL-3.0** (`LICENSE`). Keep external GPL/LGPL/permissive CLI engines (for example `ffmpeg` and `yt-dlp`) as separate on-demand subprocess binaries rather than bundling them. Use only free engines (avoid non-free `unrar`; use `unar`/`7zz`).
+- License: **GPL-3.0** (`LICENSE`). Keep external GPL/LGPL/AGPL/permissive CLI engines (for example `ffmpeg`, `yt-dlp`, `7zz`, and `ghostscript`) as separate on-demand subprocess binaries rather than bundling them. Avoid standalone non-free `unrar`; official `7zz` (licensed under LGPL-2.1-or-later, BSD-2-Clause, and BSD-3-Clause, with upstream's unRAR license restriction for RAR decoding) is allowed as an on-demand binary with its full license and unRAR restriction disclosed in Engine Manager and `README.md`.
 
 ## Clean-room rule
 

@@ -132,6 +132,15 @@ public enum ToolCatalog {
             id: "text.summarize", category: .textAndFiles,
             title: "Summarize", summary: "Summarize text and documents on-device with Apple Intelligence.",
             symbolName: "sparkles", keywords: ["summarize", "summary", "tldr", "ai", "apple intelligence"]),
+        ToolDescriptor(
+            id: "files.archive", category: .textAndFiles,
+            title: "Zip & Unzip", summary: "Create and extract ZIP, 7z, TAR, and RAR archives.",
+            symbolName: "archivebox", keywords: ["zip", "unzip", "7z", "rar", "tar", "archive", "extract", "compress"],
+            requiredEngines: [EngineCatalog.sevenZipID]),
+        ToolDescriptor(
+            id: "docs.convert", category: .textAndFiles,
+            title: "Convert Documents", summary: "Convert DOCX, DOC, RTF, HTML, ODT, TXT, and Markdown files, or export them to PDF.",
+            symbolName: "doc.on.doc.fill", keywords: ["document", "convert", "docx", "rtf", "html", "odt", "txt", "markdown", "pdf"]),
     ]
 
     // MARK: - Images & PDF
@@ -193,6 +202,27 @@ public enum ToolCatalog {
             id: "pdf.web", category: .imagesAndPDF,
             title: "Web Page to PDF", summary: "Save a web page as a PDF.",
             symbolName: "globe", keywords: ["web", "webpage", "url", "html", "pdf", "save"]),
+        ToolDescriptor(
+            id: "pdf.compress", category: .imagesAndPDF,
+            title: "Compress PDF", summary: "Shrink PDF file sizes by optimizing streams and downsampling images.",
+            symbolName: "arrow.down.doc", keywords: ["pdf", "compress", "shrink", "smaller", "optimize", "ghostscript"],
+            requiredEngines: [EngineCatalog.ghostscriptID]),
+        ToolDescriptor(
+            id: "pdf.markdown", category: .imagesAndPDF,
+            title: "Markdown to PDF", summary: "Turn Markdown files or text into clean, formatted PDFs.",
+            symbolName: "doc.plaintext", keywords: ["markdown", "md", "pdf", "convert", "export"]),
+        ToolDescriptor(
+            id: "pdf.word", category: .imagesAndPDF,
+            title: "Word to PDF", summary: "Convert Word documents (.docx, .doc, .odt, .rtf) to PDF.",
+            symbolName: "doc.text", keywords: ["word", "docx", "doc", "odt", "rtf", "pdf", "office"]),
+        ToolDescriptor(
+            id: "pdf.powerpoint", category: .imagesAndPDF,
+            title: "PowerPoint to PDF", summary: "Convert PowerPoint presentations (.pptx, .ppt) to PDF.",
+            symbolName: "rectangle.on.rectangle", keywords: ["powerpoint", "pptx", "ppt", "slides", "presentation", "pdf", "office"]),
+        ToolDescriptor(
+            id: "pdf.excel", category: .imagesAndPDF,
+            title: "Excel to PDF", summary: "Convert Excel spreadsheets (.xlsx, .xls) to PDF.",
+            symbolName: "tablecells.fill", keywords: ["excel", "xlsx", "xls", "spreadsheet", "sheet", "pdf", "office"]),
     ]
 
     // MARK: - Mac Utilities
@@ -256,14 +286,100 @@ public enum ToolCatalog {
             title: "Extract Frames", summary: "Save frames from a video as images.",
             symbolName: "photo.stack", keywords: ["frames", "video", "stills", "thumbnails", "images"]),
         ToolDescriptor(
+            id: "media.compress-video", category: .media,
+            title: "Compress Video", summary: "Reduce video file size with H.264 or HEVC.",
+            symbolName: "arrow.down.right.and.arrow.up.left",
+            keywords: ["video", "compress", "shrink", "smaller", "h264", "hevc", "mp4"],
+            requiredEngines: [EngineCatalog.ffmpegID, EngineCatalog.ffprobeID]),
+        ToolDescriptor(
             id: "media.convert", category: .media,
-            title: "Convert Video & Audio", summary: "Convert, compress, and trim media files.",
-            symbolName: "film", keywords: ["video", "audio", "convert", "compress", "mp4", "mp3"],
-            requiredEngines: [EngineCatalog.ffmpegID], availability: .planned),
+            title: "Convert Video", summary: "Convert videos between MP4, MOV, MKV, WebM, AVI, and M4V.",
+            symbolName: "film",
+            keywords: ["video", "convert", "mp4", "mov", "mkv", "webm", "avi"],
+            requiredEngines: [EngineCatalog.ffmpegID, EngineCatalog.ffprobeID]),
+        ToolDescriptor(
+            id: "media.resize-video", category: .media,
+            title: "Resize Video", summary: "Scale videos to 4K, 1080p, 720p, 480p, or custom dimensions.",
+            symbolName: "arrow.up.left.and.arrow.down.right",
+            keywords: ["video", "resize", "scale", "resolution", "1080p", "720p", "4k"],
+            requiredEngines: [EngineCatalog.ffmpegID, EngineCatalog.ffprobeID]),
+        ToolDescriptor(
+            id: "media.crop-rotate-video", category: .media,
+            title: "Crop & Rotate Video", summary: "Crop aspect ratio, rotate, or flip videos.",
+            symbolName: "crop.rotate",
+            keywords: ["video", "crop", "rotate", "flip", "aspect", "vertical", "square"],
+            requiredEngines: [EngineCatalog.ffmpegID, EngineCatalog.ffprobeID]),
+        ToolDescriptor(
+            id: "media.trim-video", category: .media,
+            title: "Trim Video", summary: "Cut a start and end range from a video.",
+            symbolName: "scissors",
+            keywords: ["video", "trim", "cut", "clip", "split"],
+            requiredEngines: [EngineCatalog.ffmpegID, EngineCatalog.ffprobeID]),
+        ToolDescriptor(
+            id: "media.merge-videos", category: .media,
+            title: "Merge Videos", summary: "Join multiple videos into one file.",
+            symbolName: "rectangle.stack.badge.plus",
+            keywords: ["video", "merge", "join", "concat", "combine"],
+            requiredEngines: [EngineCatalog.ffmpegID, EngineCatalog.ffprobeID]),
+        ToolDescriptor(
+            id: "media.mute-video", category: .media,
+            title: "Mute Video", summary: "Remove the audio track from a video without re-encoding.",
+            symbolName: "speaker.slash",
+            keywords: ["video", "mute", "silent", "remove audio", "strip audio"],
+            requiredEngines: [EngineCatalog.ffmpegID]),
+        ToolDescriptor(
+            id: "media.replace-audio", category: .media,
+            title: "Replace Audio", summary: "Swap or add an audio track onto a video.",
+            symbolName: "waveform.badge.plus",
+            keywords: ["video", "audio", "replace", "mux", "soundtrack", "dub"],
+            requiredEngines: [EngineCatalog.ffmpegID, EngineCatalog.ffprobeID]),
+        ToolDescriptor(
+            id: "media.change-speed", category: .media,
+            title: "Change Video Speed", summary: "Speed up or slow down video and audio playback.",
+            symbolName: "gauge.with.dots.needle.67percent",
+            keywords: ["video", "speed", "slow motion", "timelapse", "fast", "playback"],
+            requiredEngines: [EngineCatalog.ffmpegID, EngineCatalog.ffprobeID]),
+        ToolDescriptor(
+            id: "media.video-to-gif", category: .media,
+            title: "Video to GIF", summary: "Turn a video clip into a high-quality animated GIF.",
+            symbolName: "sparkles.tv",
+            keywords: ["video", "gif", "animated", "loop", "clip"],
+            requiredEngines: [EngineCatalog.ffmpegID, EngineCatalog.ffprobeID]),
+        ToolDescriptor(
+            id: "media.burn-subtitles", category: .media,
+            title: "Burn In Subtitles", summary: "Hardcode SRT, ASS, or WebVTT subtitles onto a video.",
+            symbolName: "captions.bubble",
+            keywords: ["video", "subtitles", "captions", "srt", "ass", "vtt", "burn", "hardcode"],
+            requiredEngines: [EngineCatalog.ffmpegID, EngineCatalog.ffprobeID]),
+        ToolDescriptor(
+            id: "media.info", category: .media,
+            title: "Media Info", summary: "Inspect codecs, resolution, bitrate, streams, and metadata.",
+            symbolName: "info.circle",
+            keywords: ["media", "info", "metadata", "ffprobe", "codec", "bitrate", "streams"],
+            requiredEngines: [EngineCatalog.ffprobeID]),
+        ToolDescriptor(
+            id: "media.convert-audio", category: .media,
+            title: "Convert Audio", summary: "Convert audio between M4A, MP3, WAV, FLAC, OGG, Opus, and AIFF.",
+            symbolName: "music.note",
+            keywords: ["audio", "convert", "mp3", "m4a", "wav", "flac", "opus", "ogg", "aiff"],
+            requiredEngines: [EngineCatalog.ffmpegID, EngineCatalog.ffprobeID]),
+        ToolDescriptor(
+            id: "media.extract-audio", category: .media,
+            title: "Extract Audio", summary: "Save the audio track from a video file.",
+            symbolName: "waveform.path.ecg",
+            keywords: ["audio", "extract", "video", "mp3", "m4a", "wav", "flac"],
+            requiredEngines: [EngineCatalog.ffmpegID, EngineCatalog.ffprobeID]),
+        ToolDescriptor(
+            id: "media.clean-audio", category: .media,
+            title: "Clean Up Audio", summary: "Reduce background noise, remove rumble, and normalize loudness.",
+            symbolName: "wand.and.stars",
+            keywords: ["audio", "clean", "denoise", "noise", "normalize", "loudness", "voice"],
+            requiredEngines: [EngineCatalog.ffmpegID, EngineCatalog.ffprobeID]),
         ToolDescriptor(
             id: "media.download", category: .media,
-            title: "Download Video", summary: "Download videos from supported sites.",
-            symbolName: "arrow.down.circle", keywords: ["download", "video", "youtube", "url"],
-            requiredEngines: [EngineCatalog.ytDlpID, EngineCatalog.ffmpegID], availability: .planned),
+            title: "Download Video", summary: "Download video or audio from supported websites.",
+            symbolName: "arrow.down.circle",
+            keywords: ["download", "video", "audio", "youtube", "url", "yt-dlp"],
+            requiredEngines: [EngineCatalog.ytDlpID, EngineCatalog.ffmpegID]),
     ]
 }

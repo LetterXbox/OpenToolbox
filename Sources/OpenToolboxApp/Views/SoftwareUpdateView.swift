@@ -40,13 +40,7 @@ struct SoftwareUpdateView: View {
             ProgressView().controlSize(.small)
         case .upToDate(let latest):
             Text(L("OpenToolbox is up to date.")).font(.headline)
-            if latest.isPrerelease {
-                currentVersionText
-                Text(L("No newer version is available.")).foregroundStyle(.secondary)
-            } else {
-                Text(L("Version \(latest.description) is the latest release."))
-                    .foregroundStyle(.secondary)
-            }
+            Text(updates.upToDateDetail(latest: latest)).foregroundStyle(.secondary)
             buttons { Button(L("OK")) { dismissWindow(id: SoftwareUpdateWindow.id) }.keyboardShortcut(.defaultAction) }
         case .available(let update):
             Text(L("OpenToolbox \(update.version.description) is available.")).font(.headline)
@@ -85,10 +79,18 @@ struct SoftwareUpdateView: View {
         case .failed(let message):
             Text(L("The update check didn't finish.")).font(.headline)
             Text(message).foregroundStyle(.secondary).textSelection(.enabled)
-            buttons {
-                Button(L("Open Releases Page")) { updates.openReleasePage(for: nil) }
-                Button(L("Try Again")) { updates.checkNow(userInitiated: true) }.keyboardShortcut(.defaultAction)
-            }
+            failureButtons
+        case .notInstalled(let message):
+            Text(L("The update wasn't installed.")).font(.headline)
+            Text(message).foregroundStyle(.secondary).textSelection(.enabled)
+            failureButtons
+        }
+    }
+
+    private var failureButtons: some View {
+        buttons {
+            Button(L("Open Releases Page")) { updates.openReleasePage(for: nil) }
+            Button(L("Try Again")) { updates.checkNow(userInitiated: true) }.keyboardShortcut(.defaultAction)
         }
     }
 

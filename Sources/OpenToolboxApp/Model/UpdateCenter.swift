@@ -28,6 +28,7 @@ final class UpdateCenter {
         case downloading(AppUpdate, Double)
         case ready(PreparedUpdate)
         case failed(String)
+        case notInstalled(String)
     }
 
     private(set) var phase: Phase = .idle
@@ -133,7 +134,7 @@ final class UpdateCenter {
         }
         if let notice = defaults.string(forKey: Self.installNoticeKey) {
             defaults.removeObject(forKey: Self.installNoticeKey)
-            phase = .failed(L("The update could not be installed when OpenToolbox quit: \(notice)"))
+            phase = .notInstalled(L("OpenToolbox tried to install it when it last quit. \(notice)"))
             hasLaunchNotice = true
         } else {
             checkIfDue()
@@ -177,7 +178,7 @@ final class UpdateCenter {
                 recordCheck()
                 switch result {
                 case .upToDate(let latest):
-                    phase = .upToDate(max(latest, currentVersion))
+                    phase = .upToDate(latest)
                 case .available(let update) where !isWanted(update.version):
                     phase = .idle
                 case .available(let update):
@@ -220,7 +221,7 @@ final class UpdateCenter {
             try process.run()
             NSApp.terminate(nil)
         } catch {
-            phase = .failed(error.localizedDescription)
+            phase = .notInstalled(Self.installProblem(error))
         }
     }
 
@@ -233,13 +234,26 @@ final class UpdateCenter {
         do {
             try installer.install(prepared)
         } catch {
-            defaults.set(error.localizedDescription, forKey: Self.installNoticeKey)
+            defaults.set(Self.installProblem(error), forKey: Self.installNoticeKey)
         }
         phase = .idle
     }
 
+    /// The line under "up to date": the latest release, or that nothing newer exists when this copy is newer.
+    func upToDateDetail(latest: AppVersion) -> String {
+        if let currentVersion, currentVersion > latest || latest.isPrerelease {
+            return L("You have version \(currentVersion.description). No newer version is available.")
+        }
+        return L("Version \(latest.description) is the latest release.")
+    }
+
     func openReleasePage(for update: AppUpdate?) {
         NSWorkspace.shared.open(update?.releasePage ?? UpdateFeed.releasesPage)
+    }
+
+    private static func installProblem(_ error: Error) -> String {
+        if case UpdateError.installFailed(let detail) = error { return detail }
+        return error.localizedDescription
     }
 
     private func checkIfDue() {
@@ -321,7 +335,7 @@ final class UpdateCenter {
             guard let installed = await launchRecord?.value ?? nil else {
                 phase = automatic || !isWanted(update.version)
                     ? offer(update)
-                    : .failed(L("OpenToolbox couldn't read its own app bundle when it opened. Quit and reopen OpenToolbox, then try again."))
+                    : .notInstalled(L("OpenToolbox couldn't read its own app bundle when it opened. Quit and reopen OpenToolbox, then try again."))
                 return
             }
             do {
@@ -339,7 +353,7 @@ final class UpdateCenter {
                 if Task.isCancelled || automatic || !isWanted(update.version) {
                     phase = offer(update)
                 } else {
-                    phase = .failed(error.localizedDescription)
+                    phase = .notInstalled(Self.installProblem(error))
                 }
             }
         }

@@ -103,6 +103,35 @@ struct UpdateCenterTests {
         }
     }
 
+    @Test func aCopyNewerThanTheLatestReleaseSaysNothingNewerIsAvailable() async throws {
+        try await withFixture(version: "0.4.1") { fixture in
+            let latest = AppVersion("0.4.0")!
+            fixture.checks.results = [.upToDate(latest: latest)]
+            let center = fixture.center()
+            center.checkNow(userInitiated: true)
+            try await waitUntil { center.phase == .upToDate(latest) }
+            #expect(center.upToDateDetail(latest: latest) == "You have version 0.4.1. No newer version is available.")
+            #expect(center.upToDateDetail(latest: AppVersion("0.4.1")!) == "Version 0.4.1 is the latest release.")
+        }
+    }
+
+    @Test func aFailedInstallOnQuitIsReportedOnceWithoutRepeatingItself() async throws {
+        try await withFixture(version: "0.2.0") { fixture in
+            fixture.installer.installError = UpdateError.installFailed("The prepared update is missing or has changed.")
+            let center = fixture.center()
+            center.install(fixture.update("0.3.0"))
+            try await waitUntil { if case .ready = center.phase { true } else { false } }
+            center.installOnQuit()
+
+            let next = fixture.center()
+            #expect(next.phase == .notInstalled(
+                "OpenToolbox tried to install it when it last quit. The prepared update is missing or has changed."))
+            #expect(next.takeLaunchNotice())
+            #expect(!next.takeLaunchNotice())
+            #expect(fixture.center().phase == .idle)
+        }
+    }
+
     @Test func noRecheckAfterAutomaticChecksAreTurnedOff() async throws {
         try await withFixture(version: "0.2.0", testBuilds: true) { fixture in
             fixture.checks.results = [.available(fixture.update("0.3.0-rc.1")), .available(fixture.update("0.3.0"))]
@@ -211,6 +240,12 @@ final class StubInstaller: UpdateInstalling, @unchecked Sendable {
     private var held: CheckedContinuation<Void, Never>?
     private var released = false
     var holdsPrepare = false
+    private var _installError: Error?
+
+    var installError: Error? {
+        get { lock.withLock { _installError } }
+        set { lock.withLock { _installError = newValue } }
+    }
 
     init(stagedApp: URL) {
         self.stagedApp = stagedApp
@@ -256,6 +291,7 @@ final class StubInstaller: UpdateInstalling, @unchecked Sendable {
     }
 
     func install(_ prepared: PreparedUpdate) throws {
+        if let error = installError { throw error }
         lock.withLock { _installed.append(prepared.stagedApp) }
     }
 

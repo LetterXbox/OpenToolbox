@@ -13,6 +13,11 @@ struct EngineManagerView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(L("Engines are external open-source programs that some tools need. They are downloaded only when you install them, verified with SHA-256, shared by every tool that uses them, and can be removed at any time."))
                         .foregroundStyle(.secondary)
+                    if let storeError = engines.storeErrorMessage {
+                        Text(storeError)
+                            .font(.callout)
+                            .foregroundStyle(.red)
+                    }
                     HStack {
                         Text(L("Using \(engines.totalDiskUsage.formatted(.byteCount(style: .file))) on disk"))
                             .font(.callout)
@@ -170,7 +175,7 @@ private struct EngineRow: View {
             case .damaged:
                 HStack {
                     Button(L("Remove"), role: .destructive) { engines.uninstall(manifest.id) }
-                    if manifest.artifact() != nil {
+                    if engines.canDownload(manifest) {
                         Button(L("Reinstall")) { engines.install(manifest) }
                     }
                 }

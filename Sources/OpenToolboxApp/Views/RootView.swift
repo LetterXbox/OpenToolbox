@@ -7,7 +7,18 @@ struct RootView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var window = WindowModel()
 
+    private struct PresentedEngineError {
+        let ids: Set<UUID>
+        let message: String
+    }
+
+    private var presentedError: PresentedEngineError? {
+        guard let message = model.engines.errorMessage else { return nil }
+        return PresentedEngineError(ids: model.engines.activeErrorIDs, message: message)
+    }
+
     var body: some View {
+        let currentAlert = presentedError
         NavigationSplitView {
             SidebarView()
         } detail: {
@@ -42,14 +53,18 @@ struct RootView: View {
         .alert(
             L("Engine error"),
             isPresented: Binding(
-                get: { model.engines.errorMessage != nil },
-                set: { if !$0 { model.engines.errorMessage = nil } }
+                get: { currentAlert != nil },
+                set: {
+                    if !$0, let ids = currentAlert?.ids {
+                        model.engines.dismissErrors(ids: ids)
+                    }
+                }
             ),
-            presenting: model.engines.errorMessage
-        ) { _ in
-            Button(L("OK")) { model.engines.errorMessage = nil }
-        } message: { message in
-            Text(message)
+            presenting: currentAlert
+        ) { presented in
+            Button(L("OK")) { model.engines.dismissErrors(ids: presented.ids) }
+        } message: { presented in
+            Text(presented.message)
         }
         .onChange(of: updates.windowRequest) {
             if updates.takeWindowRequest() { openWindow(id: SoftwareUpdateWindow.id) }
@@ -239,7 +254,7 @@ struct ToolHostView: View {
     var body: some View {
         let missing = model.engines.missingEngines(for: tool)
         let installing = missing.filter { model.engines.isInstalling($0.id) }
-        let downloadable = missing.filter { $0.artifact() != nil && !model.engines.isInstalling($0.id) }
+        let downloadable = model.engines.downloadableMissingEngines(for: [tool])
         if tool.availability == .planned {
             ContentUnavailableView(
                 tool.localizedTitle,
@@ -252,7 +267,9 @@ struct ToolHostView: View {
                 Label(tool.localizedTitle, systemImage: tool.symbolName)
             } description: {
                 VStack(spacing: 10) {
-                    if !installing.isEmpty {
+                    if let storeError = model.engines.storeErrorMessage {
+                        Text(storeError)
+                    } else if !installing.isEmpty {
                         let installingNames = installing.map(\.displayName).formatted(.list(type: .and))
                         Text(L("Downloading \(installingNames)…"))
                         if let fraction = model.engines.downloadProgress(for: tool) {

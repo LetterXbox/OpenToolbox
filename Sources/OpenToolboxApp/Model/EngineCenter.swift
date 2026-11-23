@@ -2,6 +2,11 @@ import Foundation
 import Observation
 import OpenToolboxCore
 
+struct EngineErrorNotice: Identifiable, Equatable {
+    let id = UUID()
+    let message: String
+}
+
 /// Main-actor façade over `EngineStore` for the Engine Manager UI.
 @MainActor
 @Observable
@@ -11,27 +16,41 @@ final class EngineCenter {
     private(set) var diskUsage: [EngineID: Int64] = [:]
     /// Download progress for installs in flight.
     private(set) var progress: [EngineID: Double] = [:]
-    var errorMessage: String?
+    private(set) var storeErrorMessage: String?
+    private(set) var activeErrors: [EngineErrorNotice] = []
+    @ObservationIgnored private var queuedErrors: [EngineErrorNotice] = []
 
     private let store: EngineStore?
     @ObservationIgnored private var tasks: [EngineID: Task<Void, Never>] = [:]
 
     convenience init(manifests: [EngineManifest] = EngineCatalog.all) {
-        self.init(
-            manifests: manifests,
-            store: try? EngineStore(rootDirectory: EngineStore.defaultRootDirectory())
-        )
+        do {
+            let store = try EngineStore(rootDirectory: EngineStore.defaultRootDirectory())
+            self.init(manifests: manifests, store: store)
+        } catch {
+            self.init(manifests: manifests, store: nil, storeError: error.localizedDescription)
+        }
     }
 
-    init(manifests: [EngineManifest] = EngineCatalog.all, store: EngineStore?) {
+    init(manifests: [EngineManifest] = EngineCatalog.all, store: EngineStore?, storeError: String? = nil) {
         self.manifests = manifests
         self.store = store
+        self.storeErrorMessage = storeError
         refresh()
     }
 
     var rootDirectory: URL? { store?.rootDirectory }
 
     var totalDiskUsage: Int64 { diskUsage.values.reduce(0, +) }
+
+    var errorMessage: String? {
+        guard !activeErrors.isEmpty else { return nil }
+        return activeErrors.map(\.message).joined(separator: "\n")
+    }
+
+    var activeErrorIDs: Set<UUID> {
+        Set(activeErrors.map(\.id))
+    }
 
     func status(of id: EngineID) -> EngineStatus {
         statuses[id] ?? .unavailable
@@ -73,6 +92,16 @@ final class EngineCenter {
         return sum / Double(required.count)
     }
 
+    func canDownload(_ manifest: EngineManifest) -> Bool {
+        guard store != nil, manifest.artifact() != nil, !isInstalling(manifest.id) else { return false }
+        switch status(of: manifest.id) {
+        case .notInstalled, .updateAvailable, .damaged:
+            return true
+        case .installed, .unavailable:
+            return false
+        }
+    }
+
     func missingEngines(for tool: ToolDescriptor) -> [EngineManifest] {
         missingEngines(for: [tool])
     }
@@ -89,14 +118,11 @@ final class EngineCenter {
     }
 
     func downloadableMissingEngines(for tools: [ToolDescriptor]) -> [EngineManifest] {
-        missingEngines(for: tools).filter { $0.artifact() != nil && !isInstalling($0.id) }
+        missingEngines(for: tools).filter(canDownload)
     }
 
     func downloadableMissingEngines() -> [EngineManifest] {
-        manifests.filter { manifest in
-            if case .installed = status(of: manifest.id) { return false }
-            return manifest.artifact() != nil && !isInstalling(manifest.id)
-        }
+        manifests.filter(canDownload)
     }
 
     func downloadSize(of manifests: [EngineManifest]) -> Int64 {
@@ -124,21 +150,23 @@ final class EngineCenter {
     }
 
     func install(_ manifest: EngineManifest) {
-        guard let store, tasks[manifest.id] == nil else { return }
+        guard let store else {
+            reportError(storeErrorMessage ?? L("The engine folder is unavailable."))
+            return
+        }
+        guard tasks[manifest.id] == nil else { return }
         let id = manifest.id
+        let name = manifest.displayName
         progress[id] = 0
-        errorMessage = nil
         tasks[id] = Task {
             do {
                 try await store.install(manifest) { fraction in
                     Task { @MainActor in self.updateProgress(id, fraction) }
                 }
             } catch is CancellationError {
-                // User cancelled; nothing to report.
             } catch let error as URLError where error.code == .cancelled {
-                // Cancelled download.
             } catch {
-                self.errorMessage = error.localizedDescription
+                self.reportError(L("\(name): \(error.localizedDescription)"))
             }
             self.progress[id] = nil
             self.tasks[id] = nil
@@ -151,12 +179,42 @@ final class EngineCenter {
     }
 
     func uninstall(_ id: EngineID) {
+        guard let store else {
+            reportError(storeErrorMessage ?? L("The engine folder is unavailable."))
+            return
+        }
         do {
-            try store?.uninstall(id)
+            try store.uninstall(id)
         } catch {
-            errorMessage = error.localizedDescription
+            let name = manifests.first { $0.id == id }?.displayName ?? id
+            reportError(L("\(name): \(error.localizedDescription)"))
         }
         refresh()
+    }
+
+    func dismissErrors(ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        activeErrors.removeAll { ids.contains($0.id) }
+        if activeErrors.isEmpty, !queuedErrors.isEmpty {
+            Task { @MainActor in
+                self.promoteQueuedErrors()
+            }
+        }
+    }
+
+    func reportError(_ message: String) {
+        let notice = EngineErrorNotice(message: message)
+        if activeErrors.isEmpty {
+            activeErrors = [notice]
+        } else {
+            queuedErrors.append(notice)
+        }
+    }
+
+    private func promoteQueuedErrors() {
+        guard activeErrors.isEmpty, !queuedErrors.isEmpty else { return }
+        activeErrors = queuedErrors
+        queuedErrors = []
     }
 
     private func updateProgress(_ id: EngineID, _ fraction: Double) {

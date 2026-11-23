@@ -8,12 +8,19 @@ import Testing
 private final class StubEngineDownloader: EngineDownloader, @unchecked Sendable {
     private let lock = NSLock()
     private var payloads: [URL: Data]
+    private var failures: [URL: Error]
     private var holdURLs: Set<URL>
     private var continuations: [URL: CheckedContinuation<Void, Error>] = [:]
     private var startedURLs: Set<URL> = []
+    private var cancelledURLs: Set<URL> = []
 
-    init(payloads: [URL: Data], holdURLs: Set<URL> = []) {
+    init(
+        payloads: [URL: Data] = [:],
+        failures: [URL: Error] = [:],
+        holdURLs: Set<URL> = []
+    ) {
         self.payloads = payloads
+        self.failures = failures
         self.holdURLs = holdURLs
     }
 
@@ -22,23 +29,49 @@ private final class StubEngineDownloader: EngineDownloader, @unchecked Sendable 
         to destination: URL,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws {
-        guard let data = lock.withLock({ payloads[url] }) else {
+        let lookup = lock.withLock { () -> (Data?, Error?) in
+            (payloads[url], failures[url])
+        }
+        if let failure = lookup.1 {
+            throw failure
+        }
+        guard let data = lookup.0 else {
             throw EngineDownloadError.noFile
         }
         progress(0.5)
-        let shouldHold = lock.withLock { () -> Bool in
-            startedURLs.insert(url)
-            return holdURLs.contains(url)
-        }
-        if shouldHold {
-            try await withTaskCancellationHandler {
-                try await withCheckedThrowingContinuation { continuation in
-                    lock.withLock { continuations[url] = continuation }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                enum Action {
+                    case resume
+                    case cancel
+                    case suspend
                 }
-            } onCancel: {
-                let continuation = lock.withLock { continuations.removeValue(forKey: url) }
-                continuation?.resume(throwing: CancellationError())
+                let action = lock.withLock { () -> Action in
+                    startedURLs.insert(url)
+                    if cancelledURLs.contains(url) {
+                        return .cancel
+                    }
+                    if !holdURLs.contains(url) {
+                        return .resume
+                    }
+                    continuations[url] = continuation
+                    return .suspend
+                }
+                switch action {
+                case .resume:
+                    continuation.resume()
+                case .cancel:
+                    continuation.resume(throwing: CancellationError())
+                case .suspend:
+                    break
+                }
             }
+        } onCancel: {
+            let continuation = lock.withLock { () -> CheckedContinuation<Void, Error>? in
+                cancelledURLs.insert(url)
+                return continuations.removeValue(forKey: url)
+            }
+            continuation?.resume(throwing: CancellationError())
         }
         try data.write(to: destination)
         progress(1)
@@ -85,6 +118,13 @@ struct EngineCenterTests {
         return (manifest, url)
     }
 
+    private static func makeTempDir(_ prefix: String) throws -> URL {
+        let dir = try EngineDirectory.systemTemporaryDirectory()
+            .appending(path: "\(prefix)-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     private static func waitUntil(
         timeout: Duration = .seconds(5),
         condition: @MainActor () -> Bool
@@ -100,9 +140,7 @@ struct EngineCenterTests {
     }
 
     @Test func missingEnginesDeduplicateAndTrackInstallAndDiskUsage() async throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appending(path: "OpenToolbox-EngineCenterTests-\(UUID().uuidString)", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let tempDir = try Self.makeTempDir("OpenToolbox-EngineCenterTests")
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
         let alphaData = Data(repeating: 0x41, count: 4096)
@@ -156,17 +194,69 @@ struct EngineCenterTests {
         #expect(center.installedDiskUsage(for: toolAB) > center.installedDiskUsage(for: toolA))
     }
 
+    @Test func batchDownloadFailuresReportEveryEngineName() async throws {
+        let tempDir = try Self.makeTempDir("OpenToolbox-EngineCenterErrors")
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let (alpha, alphaURL) = Self.makeManifest(id: "alpha", name: "Alpha", payload: Data([1]))
+        let (beta, betaURL) = Self.makeManifest(id: "beta", name: "Beta", payload: Data([2]))
+        let downloader = StubEngineDownloader(
+            failures: [
+                alphaURL: EngineDownloadError.httpStatus(503),
+                betaURL: EngineDownloadError.httpStatus(404),
+            ]
+        )
+        let store = EngineStore(rootDirectory: tempDir, downloader: downloader)
+        let center = EngineCenter(manifests: [alpha, beta], store: store)
+
+        center.install([alpha, beta])
+        try await Self.waitUntil { !center.isInstalling("alpha") && !center.isInstalling("beta") }
+
+        let first = try #require(center.errorMessage)
+        let firstIDs = center.activeErrorIDs
+        center.dismissErrors(ids: firstIDs)
+        try await Self.waitUntil { center.errorMessage != nil }
+
+        let second = try #require(center.errorMessage)
+        let combined = first + "\n" + second
+        #expect(combined.contains("Alpha"))
+        #expect(combined.contains("Beta"))
+        #expect(combined.contains("503"))
+        #expect(combined.contains("404"))
+
+        center.dismissErrors(ids: center.activeErrorIDs)
+        #expect(center.errorMessage == nil)
+    }
+
+    @Test func nilStoreDisablesDownloadsAndSurfacesStorageError() {
+        let (alpha, _) = Self.makeManifest(id: "alpha", name: "Alpha", payload: Data([1]))
+        let toolA = ToolDescriptor(
+            id: "test.a",
+            category: .media,
+            title: "Tool A",
+            summary: "Uses Alpha",
+            symbolName: "film",
+            requiredEngines: ["alpha"]
+        )
+        let center = EngineCenter(manifests: [alpha], store: nil, storeError: "Storage unavailable")
+
+        #expect(!center.canDownload(alpha))
+        #expect(center.downloadableMissingEngines(for: [toolA]).isEmpty)
+        #expect(center.downloadableMissingEngines().isEmpty)
+
+        center.install(alpha)
+        #expect(center.errorMessage == "Storage unavailable")
+    }
+
     @Test func appModelBatchSetEnabledPersistsAndClosesDisabledTools() throws {
         let suiteName = "OpenToolbox.EngineCenterTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let tempDir = FileManager.default.temporaryDirectory
-            .appending(path: "OpenToolbox-AppModelTests-\(UUID().uuidString)", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let tempDir = try Self.makeTempDir("OpenToolbox-AppModelTests")
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        let store = EngineStore(rootDirectory: tempDir, downloader: StubEngineDownloader(payloads: [:]))
+        let store = EngineStore(rootDirectory: tempDir, downloader: StubEngineDownloader())
         let model = AppModel(defaults: defaults, engines: EngineCenter(manifests: [], store: store))
 
         let compressPDF = try #require(ToolCatalog.tool("pdf.compress"))

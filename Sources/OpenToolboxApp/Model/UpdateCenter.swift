@@ -11,6 +11,7 @@ protocol UpdateInstalling: Sendable {
     ) async throws -> PreparedUpdate
     func install(_ prepared: PreparedUpdate) throws
     func discard(_ prepared: PreparedUpdate)
+    func abandon(_ prepared: PreparedUpdate)
 }
 
 extension UpdateInstaller: UpdateInstalling {}
@@ -29,6 +30,7 @@ final class UpdateCenter {
         case ready(PreparedUpdate)
         case failed(String)
         case notInstalled(String)
+        case installedNeedsRelaunch(AppVersion)
     }
 
     private(set) var phase: Phase = .idle
@@ -163,6 +165,7 @@ final class UpdateCenter {
         guard let currentVersion, !isBusy else { return }
         if case .ready(let prepared) = phase {
             if FileManager.default.fileExists(atPath: prepared.stagedApp.path) { return }
+            installer?.abandon(prepared)
             phase = .idle
         }
         if !userInitiated { recordAutomaticAttempt() }
@@ -213,17 +216,24 @@ final class UpdateCenter {
         guard case .ready(let prepared) = phase, let installer else { return }
         do {
             try installer.install(prepared)
-            phase = .idle
-            let command = UpdateInstaller.relaunchCommand(
-                waitingFor: ProcessInfo.processInfo.processIdentifier, app: prepared.installedApp)
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: command.executable)
-            process.arguments = command.arguments
-            try process.run()
-            NSApp.terminate(nil)
         } catch {
+            installer.abandon(prepared)
             phase = .notInstalled(Self.installProblem(error))
+            return
         }
+        let command = UpdateInstaller.relaunchCommand(
+            waitingFor: ProcessInfo.processInfo.processIdentifier, app: prepared.installedApp)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: command.executable)
+        process.arguments = command.arguments
+        do {
+            try process.run()
+        } catch {
+            phase = .installedNeedsRelaunch(prepared.version)
+            return
+        }
+        phase = .idle
+        NSApp.terminate(nil)
     }
 
     /// Installs a prepared update without reopening, used when the app quits.

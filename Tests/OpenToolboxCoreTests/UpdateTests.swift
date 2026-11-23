@@ -617,6 +617,11 @@ struct UpdateTests {
             installer.removeLeftovers(next: installed)
             #expect(!FileManager.default.fileExists(atPath: staged.path))
 
+            let legacy = try Self.makeApp(in: root, version: "0.2.0",
+                name: "\(UpdateInstaller.legacyStagedPrefix)\(UUID().uuidString).app")
+            installer.removeLeftovers(next: installed)
+            #expect(FileManager.default.fileExists(atPath: legacy.path))
+
             let orphan = root.appending(path: "\(UpdateInstaller.stagedPrefix)\(UUID().uuidString).lease")
             try Data().write(to: orphan)
             installer.removeLeftovers(next: installed)

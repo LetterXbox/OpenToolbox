@@ -84,6 +84,11 @@ struct SoftwareUpdateView: View {
             Text(L("The update wasn't installed.")).font(.headline)
             Text(message).foregroundStyle(.secondary).textSelection(.enabled)
             failureButtons
+        case .installedNeedsRelaunch(let version):
+            Text(L("OpenToolbox \(version.description) is installed.")).font(.headline)
+            Text(L("OpenToolbox couldn't reopen itself. Quit OpenToolbox and open it again to use the new version."))
+                .foregroundStyle(.secondary)
+            buttons { Button(L("Quit OpenToolbox")) { NSApp.terminate(nil) }.keyboardShortcut(.defaultAction) }
         }
     }
 

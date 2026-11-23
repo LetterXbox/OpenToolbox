@@ -55,7 +55,9 @@ public struct PreparedUpdate: Equatable, Sendable {
 
 /// Downloads, verifies, stages and installs a release disk image over the running app.
 public struct UpdateInstaller: Sendable {
-    static let stagedPrefix = ".OpenToolbox-update-"
+    static let stagedPrefix = ".OpenToolbox-staged-"
+    static let legacyStagedPrefix = ".OpenToolbox-update-"
+    static let legacyStagedAge: TimeInterval = 7 * 24 * 60 * 60
 
     private let downloader: EngineDownloader
     private let commands: UpdateCommandRunner
@@ -227,6 +229,11 @@ public struct UpdateInstaller: Sendable {
         Self.releaseStaging(staged)
     }
 
+    /// Gives up a prepared update without removing its staged copy, so cleanup at a later launch may remove it.
+    public func abandon(_ prepared: PreparedUpdate) {
+        Self.releaseStaging(prepared.stagedApp)
+    }
+
     /// Removes the staged copy of an update that will not be installed.
     public func discard(_ prepared: PreparedUpdate) {
         let staged = prepared.stagedApp
@@ -258,6 +265,15 @@ public struct UpdateInstaller: Sendable {
             try? FileManager.default.removeItem(at: candidate)
             unlink(Self.stagingLease(for: candidate).path)
             close(lease)
+        }
+        for name in names where Self.isLegacyStagedName(name) {
+            let candidate = folder.appending(path: name, directoryHint: .isDirectory)
+            var info = stat()
+            guard Self.bundleInfo(at: candidate)?.identifier == bundleIdentifier,
+                lstat(candidate.path, &info) == 0,
+                Date().timeIntervalSince1970 - Double(info.st_ctimespec.tv_sec) > Self.legacyStagedAge
+            else { continue }
+            try? FileManager.default.removeItem(at: candidate)
         }
         for name in names where Self.isStagingLeaseName(name) {
             let lease = folder.appending(path: name, directoryHint: .notDirectory)
@@ -310,9 +326,13 @@ public struct UpdateInstaller: Sendable {
         isStagedName(name, suffix: ".lease")
     }
 
-    private static func isStagedName(_ name: String, suffix: String) -> Bool {
-        guard name.hasPrefix(stagedPrefix), name.hasSuffix(suffix) else { return false }
-        let id = name.dropFirst(stagedPrefix.count).dropLast(suffix.count)
+    static func isLegacyStagedName(_ name: String) -> Bool {
+        isStagedName(name, prefix: legacyStagedPrefix, suffix: ".app")
+    }
+
+    private static func isStagedName(_ name: String, prefix: String = stagedPrefix, suffix: String) -> Bool {
+        guard name.hasPrefix(prefix), name.hasSuffix(suffix) else { return false }
+        let id = name.dropFirst(prefix.count).dropLast(suffix.count)
         return UUID(uuidString: String(id)) != nil
     }
 
@@ -333,7 +353,8 @@ public struct UpdateInstaller: Sendable {
 
     static func holdStaging(_ staged: URL) -> Bool {
         let path = stagingLease(for: staged).path
-        guard let descriptor = lease(file: stagingLease(for: staged)) else { return false }
+        let descriptor = open(path, O_RDWR | O_CREAT | O_EXCL | O_EXLOCK | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        guard descriptor >= 0 else { return false }
         stagingLock.withLock { heldStagings[path] = descriptor }
         return true
     }
@@ -390,13 +411,8 @@ public struct UpdateInstaller: Sendable {
     }
 
     static func lease(file: URL) -> Int32? {
-        let descriptor = open(file.path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600)
-        guard descriptor >= 0 else { return nil }
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
-            close(descriptor)
-            return nil
-        }
-        return descriptor
+        let descriptor = open(file.path, O_RDWR | O_CREAT | O_EXLOCK | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        return descriptor >= 0 ? descriptor : nil
     }
 
     /// The code directory hash of `app` when its signature is valid for every architecture and nested item.

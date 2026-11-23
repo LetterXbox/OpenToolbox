@@ -132,6 +132,18 @@ struct UpdateCenterTests {
         }
     }
 
+    @Test func aFailedRestartGivesUpItsStagedUpdate() async throws {
+        try await withFixture(version: "0.2.0") { fixture in
+            fixture.installer.installError = UpdateError.installFailed("The prepared update is missing or has changed.")
+            let center = fixture.center()
+            center.install(fixture.update("0.3.0"))
+            try await waitUntil { if case .ready = center.phase { true } else { false } }
+            center.restartNow()
+            #expect(center.phase == .notInstalled("The prepared update is missing or has changed."))
+            #expect(fixture.installer.abandoned == [fixture.stagedApp])
+        }
+    }
+
     @Test func noRecheckAfterAutomaticChecksAreTurnedOff() async throws {
         try await withFixture(version: "0.2.0", testBuilds: true) { fixture in
             fixture.checks.results = [.available(fixture.update("0.3.0-rc.1")), .available(fixture.update("0.3.0"))]
@@ -236,6 +248,7 @@ final class StubInstaller: UpdateInstalling, @unchecked Sendable {
     private let stagedApp: URL
     private var _discarded: [URL] = []
     private var _installed: [URL] = []
+    private var _abandoned: [URL] = []
     private var _prepareStarted = false
     private var _resumedCancelled: Bool?
     private var held: CheckedContinuation<Void, Never>?
@@ -254,6 +267,7 @@ final class StubInstaller: UpdateInstalling, @unchecked Sendable {
 
     var discarded: [URL] { lock.withLock { _discarded } }
     var installed: [URL] { lock.withLock { _installed } }
+    var abandoned: [URL] { lock.withLock { _abandoned } }
     var prepareStarted: Bool { lock.withLock { _prepareStarted } }
     var resumedCancelled: Bool? { lock.withLock { _resumedCancelled } }
 
@@ -298,6 +312,10 @@ final class StubInstaller: UpdateInstalling, @unchecked Sendable {
 
     func discard(_ prepared: PreparedUpdate) {
         lock.withLock { _discarded.append(prepared.stagedApp) }
+    }
+
+    func abandon(_ prepared: PreparedUpdate) {
+        lock.withLock { _abandoned.append(prepared.stagedApp) }
     }
 }
 

@@ -58,7 +58,7 @@ private func saveRecording(
         if !inStore { rmdir(folder.path) }
         return (url, nil)
     case .kept(let url, let reason):
-        guard url != temporary || inStore else {
+        guard url != temporary else {
             return (nil, L("The recording couldn't be saved: \(reason) It is still at \(url.path)."))
         }
         if !inStore { rmdir(folder.path) }

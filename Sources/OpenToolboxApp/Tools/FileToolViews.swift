@@ -23,6 +23,7 @@ struct BatchRenameView: View {
     @State private var revision = 0
 
     @State private var isWorkingHere = false
+    @Environment(WindowModel.self) private var window
     private let session = FileToolSession.shared
 
     private enum Mode: Hashable { case copy, inPlace }
@@ -296,10 +297,10 @@ struct BatchRenameView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!canApply)
                 Button(L("Undo Last Rename")) { undo() }
-                    .disabled(session.undoJournal == nil || session.isRenaming || session.isRecycling)
+                    .disabled(window.renameUndo == nil || session.isRenaming || session.isRecycling)
                 if isWorkingHere { ProgressView().controlSize(.small) }
             }
-            if let journal = session.undoJournal {
+            if let journal = window.renameUndo?.journal {
                 Text(undoSummary(journal))
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -312,9 +313,9 @@ struct BatchRenameView: View {
         let count = journal.fileCount
         if folders.count == 1, let folder = folders.first {
             let path = (folder.path as NSString).abbreviatingWithTildeInPath
-            return L("Undo restores the last rename in any window: \(count) files in \(path).")
+            return L("Undo restores the last rename in this window: \(count) files in \(path).")
         }
-        return L("Undo restores the last rename in any window: \(count) files in \(folders.count) folders.")
+        return L("Undo restores the last rename in this window: \(count) files in \(folders.count) folders.")
     }
 
     private func resultSummary(_ result: RenameResult) -> some View {
@@ -392,8 +393,7 @@ struct BatchRenameView: View {
                 }.value
 
                 if let journal = result.undoJournal {
-                    session.undoJournal = journal
-                    session.undoScopes = request.files
+                    window.renameUndo = (journal, request.files)
                 }
                 if !copying {
                     let finished = Set(result.completed)
@@ -410,8 +410,7 @@ struct BatchRenameView: View {
     }
 
     private func undo() {
-        guard let journal = session.undoJournal, !session.isRenaming, !session.isRecycling else { return }
-        let scopes = session.undoScopes
+        guard let (journal, scopes) = window.renameUndo, !session.isRenaming, !session.isRecycling else { return }
         session.isRenaming = true
         isWorkingHere = true
         result = nil
@@ -420,8 +419,7 @@ struct BatchRenameView: View {
             let result = await Task.detached(priority: .userInitiated) {
                 withFileToolAccess(scopes) { BatchRename.undo(journal) }
             }.value
-            session.undoJournal = result.undoJournal
-            if result.undoJournal == nil { session.undoScopes = [] }
+            window.renameUndo = result.undoJournal.map { ($0, scopes) }
             resultTitle = L("Restored \(result.completed.count) names")
             self.result = result
             revision += 1
@@ -776,8 +774,6 @@ private final class FileToolSession {
     static let shared = FileToolSession()
 
     var isRenaming = false
-    var undoJournal: RenameUndoJournal?
-    var undoScopes: [URL] = []
     var isRecycling = false
 }
 

@@ -16,6 +16,8 @@ final class WindowModel {
     private(set) var busyTools: Set<ToolID> = []
     /// Tools whose work finished while they weren't in front of the user.
     private(set) var finishedTools: Set<ToolID> = []
+    /// The last Batch Rename in this window that can be undone, and the files it needs access to.
+    var renameUndo: (journal: RenameUndoJournal, scopes: [URL])?
     @ObservationIgnored weak var window: NSWindow?
     /// Called when a tool finishes work while it isn't in front of the user.
     @ObservationIgnored var onFinish: (ToolDescriptor, WindowModel) -> Void = { _, _ in }

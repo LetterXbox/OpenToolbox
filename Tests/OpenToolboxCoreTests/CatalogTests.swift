@@ -37,6 +37,32 @@ struct CatalogTests {
         #expect(decoded == preferences)
     }
 
+    @Test func batchSetEnabledSkipsPlannedToolsAndMinimizesOverrides() throws {
+        var preferences = ToolPreferences()
+        let json = try #require(ToolCatalog.tool("dev.json-formatter"))
+        let compressPDF = try #require(ToolCatalog.tool("pdf.compress"))
+        let planned = ToolDescriptor(
+            id: "test.planned",
+            category: .developer,
+            title: "Planned Tool",
+            summary: "Not shipped yet",
+            symbolName: "sparkles",
+            requiredEngines: [EngineCatalog.ffmpegID],
+            availability: .planned
+        )
+
+        preferences.setEnabled(true, for: [json, compressPDF, planned])
+        #expect(preferences.isEnabled(json))
+        #expect(preferences.isEnabled(compressPDF))
+        #expect(!preferences.isEnabled(planned))
+        #expect(preferences.overrides == ["pdf.compress": true])
+
+        preferences.setEnabled(false, for: [json, compressPDF, planned])
+        #expect(!preferences.isEnabled(json))
+        #expect(!preferences.isEnabled(compressPDF))
+        #expect(preferences.overrides == ["dev.json-formatter": false])
+    }
+
     @Test func searchRanksTitlePrefixFirst() {
         let results = CommandSearch.rank("json", in: ToolCatalog.all).map(\.id)
         #expect(results.first == "dev.json-formatter")

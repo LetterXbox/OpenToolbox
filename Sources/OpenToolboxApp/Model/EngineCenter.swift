@@ -16,9 +16,16 @@ final class EngineCenter {
     private let store: EngineStore?
     @ObservationIgnored private var tasks: [EngineID: Task<Void, Never>] = [:]
 
-    init(manifests: [EngineManifest] = EngineCatalog.all) {
+    convenience init(manifests: [EngineManifest] = EngineCatalog.all) {
+        self.init(
+            manifests: manifests,
+            store: try? EngineStore(rootDirectory: EngineStore.defaultRootDirectory())
+        )
+    }
+
+    init(manifests: [EngineManifest] = EngineCatalog.all, store: EngineStore?) {
         self.manifests = manifests
-        store = try? EngineStore(rootDirectory: EngineStore.defaultRootDirectory())
+        self.store = store
         refresh()
     }
 
@@ -38,18 +45,81 @@ final class EngineCenter {
         store?.executableURL(for: id)
     }
 
-    /// Engines a tool needs that are not ready at the pinned build yet.
-    func missingEngines(for tool: ToolDescriptor) -> [EngineManifest] {
-        tool.requiredEngines.compactMap { id in
-            if case .installed = status(of: id) { return nil }
-            return manifests.first { $0.id == id }
+    func allEnginesInstalled(for tool: ToolDescriptor) -> Bool {
+        tool.requiredEngines.allSatisfy { id in
+            if case .installed = status(of: id) { return true }
+            return false
         }
+    }
+
+    func installedDiskUsage(for tool: ToolDescriptor) -> Int64 {
+        Set(tool.requiredEngines).reduce(Int64(0)) { total, id in
+            total + diskUsage[id, default: 0]
+        }
+    }
+
+    func downloadProgress(for tool: ToolDescriptor) -> Double? {
+        let required = Array(Set(tool.requiredEngines))
+        guard !required.isEmpty, required.contains(where: { isInstalling($0) }) else { return nil }
+        let sum = required.reduce(0.0) { partial, id in
+            if let fraction = progress[id] {
+                return partial + min(max(fraction, 0), 1)
+            }
+            if case .installed = status(of: id) {
+                return partial + 1
+            }
+            return partial
+        }
+        return sum / Double(required.count)
+    }
+
+    func missingEngines(for tool: ToolDescriptor) -> [EngineManifest] {
+        missingEngines(for: [tool])
+    }
+
+    func missingEngines(for tools: [ToolDescriptor]) -> [EngineManifest] {
+        var neededIDs = Set<EngineID>()
+        for tool in tools where tool.availability == .available {
+            for id in tool.requiredEngines {
+                if case .installed = status(of: id) { continue }
+                neededIDs.insert(id)
+            }
+        }
+        return manifests.filter { neededIDs.contains($0.id) }
+    }
+
+    func downloadableMissingEngines(for tools: [ToolDescriptor]) -> [EngineManifest] {
+        missingEngines(for: tools).filter { $0.artifact() != nil && !isInstalling($0.id) }
+    }
+
+    func downloadableMissingEngines() -> [EngineManifest] {
+        manifests.filter { manifest in
+            if case .installed = status(of: manifest.id) { return false }
+            return manifest.artifact() != nil && !isInstalling(manifest.id)
+        }
+    }
+
+    func downloadSize(of manifests: [EngineManifest]) -> Int64 {
+        var seen = Set<EngineID>()
+        var total: Int64 = 0
+        for manifest in manifests where seen.insert(manifest.id).inserted {
+            total += manifest.artifact()?.sizeBytes ?? 0
+        }
+        return total
     }
 
     func refresh() {
         for manifest in manifests {
             statuses[manifest.id] = store?.status(of: manifest) ?? .unavailable
             diskUsage[manifest.id] = store?.diskUsage(of: manifest.id) ?? 0
+        }
+    }
+
+    func install(_ manifests: [EngineManifest]) {
+        var seen = Set<EngineID>()
+        for manifest in manifests where seen.insert(manifest.id).inserted {
+            if case .installed = status(of: manifest.id) { continue }
+            install(manifest)
         }
     }
 

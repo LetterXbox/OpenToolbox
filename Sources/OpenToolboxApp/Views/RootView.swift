@@ -231,7 +231,6 @@ private struct DetailDeckLayout: Layout {
     }
 }
 
-/// Shows a tool's view, or explains what it still needs.
 struct ToolHostView: View {
     @Environment(AppModel.self) private var model
     @Environment(WindowModel.self) private var window
@@ -239,18 +238,47 @@ struct ToolHostView: View {
 
     var body: some View {
         let missing = model.engines.missingEngines(for: tool)
+        let installing = missing.filter { model.engines.isInstalling($0.id) }
+        let downloadable = missing.filter { $0.artifact() != nil && !model.engines.isInstalling($0.id) }
         if tool.availability == .planned {
             ContentUnavailableView(
                 tool.localizedTitle,
                 systemImage: tool.symbolName,
                 description: Text(L("This tool is planned for a later OpenToolbox release."))
             )
-        } else if !missing.isEmpty {
+        } else if !model.engines.allEnginesInstalled(for: tool) {
+            let names = (missing.isEmpty ? tool.requiredEngines : missing.map(\.displayName)).formatted(.list(type: .and))
             ContentUnavailableView {
                 Label(tool.localizedTitle, systemImage: tool.symbolName)
             } description: {
-                Text(L("This tool needs \(missing.map(\.displayName).formatted(.list(type: .and))), which is downloaded on demand."))
+                VStack(spacing: 10) {
+                    if !installing.isEmpty {
+                        let installingNames = installing.map(\.displayName).formatted(.list(type: .and))
+                        Text(L("Downloading \(installingNames)…"))
+                        if let fraction = model.engines.downloadProgress(for: tool) {
+                            ProgressView(value: fraction)
+                                .frame(maxWidth: 260)
+                        }
+                    } else {
+                        Text(L("This tool needs \(names), which is downloaded on demand."))
+                    }
+                }
             } actions: {
+                if !downloadable.isEmpty {
+                    let size = model.engines.downloadSize(of: downloadable).formatted(.byteCount(style: .file))
+                    let downloadNames = downloadable.map(\.displayName).formatted(.list(type: .and))
+                    Button(L("Download \(downloadNames) (\(size))")) {
+                        model.engines.install(downloadable)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                if !installing.isEmpty {
+                    Button(L("Cancel")) {
+                        for manifest in installing {
+                            model.engines.cancelInstall(manifest.id)
+                        }
+                    }
+                }
                 Button(L("Open Engine Manager")) { window.open(.engines) }
             }
         } else {

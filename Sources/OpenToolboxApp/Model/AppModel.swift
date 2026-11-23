@@ -55,7 +55,7 @@ final class AppModel {
     @ObservationIgnored private var hotKey: GlobalHotKey?
     @ObservationIgnored private let notifier = ToolNotifier()
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, engines: EngineCenter? = nil) {
         self.defaults = defaults
         if let data = defaults.data(forKey: Self.preferencesKey),
             let stored = try? JSONDecoder().decode(ToolPreferences.self, from: data)
@@ -69,7 +69,7 @@ final class AppModel {
         } else {
             outputBaseDirectory = OutputDirectory.defaultBaseDirectory()
         }
-        engines = EngineCenter()
+        self.engines = engines ?? EngineCenter()
         showsMenuBarExtra = defaults.bool(forKey: Self.menuBarKey)
         usesQuickOpenHotKey = defaults.bool(forKey: Self.hotKeyKey)
     }
@@ -175,13 +175,14 @@ final class AppModel {
     }
 
     private func updateActivationPolicy(closing: ObjectIdentifier? = nil) {
-        let hasOtherWindow = NSApp.windows.contains { window in
+        guard let app = NSApp else { return }
+        let hasOtherWindow = app.windows.contains { window in
             ObjectIdentifier(window) != closing && window.isVisible && window.styleMask.contains(.titled)
                 && !(window is NSPanel)
         }
         let policy: NSApplication.ActivationPolicy =
             windows.isEmpty && showsMenuBarExtra && !hasOtherWindow ? .accessory : .regular
-        if NSApp.activationPolicy() != policy { NSApp.setActivationPolicy(policy) }
+        if app.activationPolicy() != policy { app.setActivationPolicy(policy) }
     }
 
     private func applyHotKey() {
@@ -221,6 +222,20 @@ final class AppModel {
         }
         if !enabled {
             for window in windows.values { window.close(tool.id) }
+        }
+    }
+
+    func setEnabled(_ enabled: Bool, for tools: [ToolDescriptor]) {
+        let available = tools.filter { $0.availability == .available }
+        guard !available.isEmpty else { return }
+        preferences.setEnabled(enabled, for: available)
+        if let data = try? JSONEncoder().encode(preferences) {
+            defaults.set(data, forKey: Self.preferencesKey)
+        }
+        if !enabled {
+            for tool in available {
+                for window in windows.values { window.close(tool.id) }
+            }
         }
     }
 

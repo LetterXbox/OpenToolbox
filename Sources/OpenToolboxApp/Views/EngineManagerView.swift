@@ -36,6 +36,20 @@ struct EngineManagerView: View {
         }
         .navigationTitle(L("Engines"))
         .toolbar {
+            let needed = engines.downloadableMissingEngines(for: model.activeTools)
+            let allMissing = engines.downloadableMissingEngines()
+            if !needed.isEmpty {
+                let size = engines.downloadSize(of: needed).formatted(.byteCount(style: .file))
+                Button(L("Download Needed (\(size))")) {
+                    engines.install(needed)
+                }
+                .buttonStyle(.borderedProminent)
+            } else if !allMissing.isEmpty {
+                let size = engines.downloadSize(of: allMissing).formatted(.byteCount(style: .file))
+                Button(L("Download All (\(size))")) {
+                    engines.install(allMissing)
+                }
+            }
             Button {
                 engines.refresh()
             } label: {

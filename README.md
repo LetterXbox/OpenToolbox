@@ -24,7 +24,7 @@ OpenToolbox brings 74 everyday utilities together in a single Swift and SwiftUI 
 - **Pure native macOS (macOS 15+):** Built with Swift, SwiftUI, and Apple frameworks (Vision, PDFKit, ImageIO, AVFoundation, ScreenCaptureKit, Speech, Translation, Quick Look, WebKit, and Foundation Models)—no Electron, no web wrappers, and universal binaries for Apple silicon and Intel.
 - **Private and offline by default:** No accounts, no telemetry, and no file uploads. All built-in tools—including **Translate**, **Transcribe**, **Summarize**, **Markdown to PDF**, and **Word / PowerPoint / Excel to PDF**—process files locally on your Mac. OpenToolbox connects to the network only when you explicitly start an online action: downloading on-demand engines, downloading a media URL in **Download Video**, running **Network Speed Test**, checking for or downloading updates, loading a URL in **Web Page to PDF**, showing or searching the map in **Coordinate Picker** (Apple Maps), or clicking **Find Network Scanners** in **Scan Document**. You can also opt in to daily automatic update checks; a second opt-in lets OpenToolbox download an available update's disk image after a daily check without a further click and install it when you restart or quit (both are off by default). For **Translate** and (on macOS 26+) **Transcribe**, macOS may download an on-device language pack the first time you use a language.
 - **Originals stay untouched:** Tools that export processed copies write new, collision-safe files into `<output folder>/<yyyy-MM-dd>/<tool>/` rather than overwriting your source files. Actions that modify or remove existing files happen only when you explicitly choose them—such as **Batch Rename**'s **Rename in place** mode (which supports undo), **Find Duplicates** moving selected copies to Trash, and **Quarantine Helper** clearing a file's quarantine flag in place.
-- **On-demand external engines:** Built-in tools work out of the box with zero extra downloads. External CLI engines are never bundled; tools requiring them start disabled in the **Tool Catalog** and only download pinned, SHA-256-verified builds on request in the **Engine Manager**, shared across tools and removable in one click.
+- **On-demand external engines:** Built-in tools work out of the box with zero extra downloads. External CLI engines are never bundled; tools requiring them start disabled in the **Tool Catalog** and only download pinned, SHA-256-verified builds when you confirm or install them in the **Engine Manager**, shared across tools and removable in one click.
 
 ## Highlights
 
@@ -138,7 +138,7 @@ Powered on-device by Apple's Vision, PDFKit, ImageIO, Image Capture, Quick Look,
 
 #### On-Demand Engines
 
-Tools that rely on external CLI programs start disabled in **Tool Catalog** and download nothing automatically. Install or remove pinned, SHA-256-verified builds individually in **Engines**:
+Tools that rely on external CLI programs start disabled in **Tool Catalog** and download nothing until you confirm. You can enable tools individually or in bulk, and install or remove pinned, SHA-256-verified builds in **Engines**:
 
 - **FFmpeg** 9.1 (GPL-3.0-or-later) and **FFprobe** 9.1 (GPL-3.0-or-later)
 - **yt-dlp** 2026.10.26 (GPL-3.0-or-later standalone macOS binary)

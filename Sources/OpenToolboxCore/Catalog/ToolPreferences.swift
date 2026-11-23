@@ -28,6 +28,12 @@ public struct ToolPreferences: Codable, Equatable, Sendable {
         }
     }
 
+    public mutating func setEnabled(_ enabled: Bool, for tools: some Sequence<ToolDescriptor>) {
+        for tool in tools where tool.availability == .available {
+            setEnabled(enabled, for: tool)
+        }
+    }
+
     /// Enabled tools from `tools`, keeping catalog order.
     public func enabledTools(from tools: [ToolDescriptor] = ToolCatalog.all) -> [ToolDescriptor] {
         tools.filter(isEnabled)

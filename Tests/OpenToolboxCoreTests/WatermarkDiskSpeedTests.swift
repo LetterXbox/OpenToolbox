@@ -456,7 +456,7 @@ struct DiskSpeedTests {
             let missing = directory.appending(path: "missing", directoryHint: .isDirectory)
             #expect(throws: DiskSpeedError.cannotWrite("Test")) {
                 try DiskSpeedTest.run(
-                    in: missing, volumeName: "Test", expected: VolumeIdentity(fileSystemID: 0, uuid: nil, totalBytes: 0),
+                    in: missing, volumeName: "Test", expected: VolumeIdentity(fileSystemID: 0, uuid: nil, device: "", appeared: nil),
                     bytes: Int64(megabyte), reserve: 0)
             }
         }

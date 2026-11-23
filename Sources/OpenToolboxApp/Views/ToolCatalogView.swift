@@ -144,7 +144,7 @@ private struct ToolCatalogRow: View {
         HStack(spacing: 12) {
             Image(systemName: tool.symbolName)
                 .font(.title3)
-                .frame(width: 28)
+                .frame(width: 30)
                 .foregroundStyle(tool.availability == .available ? Color.accentColor : Color.secondary)
             VStack(alignment: .leading, spacing: 2) {
                 Text(tool.localizedTitle)

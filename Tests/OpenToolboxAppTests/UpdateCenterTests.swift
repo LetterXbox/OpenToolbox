@@ -144,6 +144,24 @@ struct UpdateCenterTests {
         }
     }
 
+    @Test func anInstalledUpdateWaitingForRelaunchSurvivesALaterCheck() async throws {
+        try await withFixture(version: "0.2.0") { fixture in
+            let update = fixture.update("0.3.0")
+            let center = fixture.center()
+            center.install(update)
+            try await waitUntil { if case .ready = center.phase { true } else { false } }
+            center.restartNow()
+            #expect(fixture.terminations == 1)
+            #expect(fixture.installer.installed == [fixture.stagedApp])
+
+            center.cancelRelaunch()
+            fixture.checks.results = [.available(update)]
+            center.checkNow(userInitiated: true)
+            #expect(center.phase == .installedNeedsRelaunch(AppVersion("0.3.0")!))
+            #expect(fixture.checks.requests.isEmpty)
+        }
+    }
+
     @Test func noRecheckAfterAutomaticChecksAreTurnedOff() async throws {
         try await withFixture(version: "0.2.0", testBuilds: true) { fixture in
             fixture.checks.results = [.available(fixture.update("0.3.0-rc.1")), .available(fixture.update("0.3.0"))]
@@ -172,6 +190,7 @@ final class UpdateFixture {
     let suiteName = "OpenToolboxAppTests-\(UUID().uuidString)"
     let installer: StubInstaller
     let checks = StubChecks()
+    var terminations = 0
 
     init(version: String) throws {
         root = URL.temporaryDirectory.appending(path: "UpdateCenterTests-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -197,7 +216,7 @@ final class UpdateFixture {
         return UpdateCenter(
             defaults: defaults, bundle: Bundle(url: appURL)!, installer: installer,
             check: { _, includingTestBuilds in try await checks.answer(includingTestBuilds: includingTestBuilds) },
-            runningExecutable: .unchecked)
+            runningExecutable: .unchecked, terminate: { [weak self] in self?.terminations += 1 })
     }
 
     func update(_ version: String) -> AppUpdate {
@@ -280,7 +299,7 @@ final class StubInstaller: UpdateInstalling, @unchecked Sendable {
         pending?.resume()
     }
 
-    func removeLeftovers(next installedApp: URL, isOnlyCopyRunning: Bool) {}
+    func removeLeftovers(next installedApp: URL) {}
 
     func removeStaleWork() async {}
 

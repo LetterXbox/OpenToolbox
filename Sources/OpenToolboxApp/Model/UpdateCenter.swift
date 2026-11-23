@@ -4,7 +4,7 @@ import Observation
 import OpenToolboxCore
 
 protocol UpdateInstalling: Sendable {
-    func removeLeftovers(next installedApp: URL, isOnlyCopyRunning: Bool)
+    func removeLeftovers(next installedApp: URL)
     func removeStaleWork() async
     func prepare(
         _ update: AppUpdate, replacing installed: InstalledApp, progress: @escaping @Sendable (Double) -> Void
@@ -86,6 +86,7 @@ final class UpdateCenter {
     private let appURL: URL
     private let installer: (any UpdateInstalling)?
     private let check: UpdateCheck
+    private let terminate: @MainActor () -> Void
     private var task: Task<Void, Never>?
     private var relaunchApp: URL?
     private var launchRecord: Task<InstalledApp?, Never>?
@@ -109,10 +110,12 @@ final class UpdateCenter {
         bundle: Bundle = .main,
         installer: (any UpdateInstalling)? = (try? UpdateInstaller.defaultWorkRoot()).map { UpdateInstaller(workRoot: $0) },
         check: @escaping UpdateCheck = UpdateCenter.liveCheck,
-        runningExecutable: LaunchRecord.Executable? = UpdateInstaller.runningExecutable()
+        runningExecutable: LaunchRecord.Executable? = UpdateInstaller.runningExecutable(),
+        terminate: @escaping @MainActor () -> Void = { NSApp.terminate(nil) }
     ) {
         self.defaults = defaults
         self.check = check
+        self.terminate = terminate
         appURL = bundle.bundleURL
         let version = (bundle.infoDictionary?["CFBundleShortVersionString"] as? String).flatMap(AppVersion.init)
         currentVersion = version
@@ -126,12 +129,7 @@ final class UpdateCenter {
 
         let record = unsupportedReason == nil
             ? runningExecutable.flatMap { UpdateInstaller.launchRecord(at: appURL, executable: $0) } : nil
-        if unsupportedReason == nil {
-            let others = bundle.bundleIdentifier.map {
-                NSRunningApplication.runningApplications(withBundleIdentifier: $0).filter { $0 != .current }
-            } ?? []
-            installer?.removeLeftovers(next: appURL, isOnlyCopyRunning: others.isEmpty)
-        }
+        if unsupportedReason == nil { installer?.removeLeftovers(next: appURL) }
         let installer = installer
         launchRecord = Task.detached {
             let installed = record.flatMap(UpdateInstaller.installedApp(completing:))
@@ -169,6 +167,7 @@ final class UpdateCenter {
     /// Checks GitHub now. A user-initiated check reports its result in the Software Update window.
     func checkNow(userInitiated: Bool) {
         guard let currentVersion, !isBusy else { return }
+        if case .installedNeedsRelaunch = phase { return }
         if case .ready(let prepared) = phase {
             if FileManager.default.fileExists(atPath: prepared.stagedApp.path) { return }
             installer?.abandon(prepared)
@@ -229,7 +228,7 @@ final class UpdateCenter {
         }
         phase = .installedNeedsRelaunch(prepared.version)
         relaunchApp = prepared.installedApp
-        NSApp.terminate(nil)
+        terminate()
     }
 
     /// Forgets a pending relaunch after quitting was cancelled.

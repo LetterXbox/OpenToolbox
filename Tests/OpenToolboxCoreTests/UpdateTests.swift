@@ -223,6 +223,21 @@ struct UpdateTests {
         }
     }
 
+    @Test func aPipeInPlaceOfABundleFileIsRefusedWithoutWaiting() throws {
+        try withTemporaryDirectorySync { root in
+            let app = try Self.makeApp(in: root, version: "0.1.0")
+            let executable = app.appending(path: "Contents/MacOS/OpenToolbox")
+            try FileManager.default.removeItem(at: executable)
+            #expect(mkfifo(executable.path, 0o600) == 0)
+            #expect(UpdateInstaller.contents(of: app) == nil)
+
+            let plist = app.appending(path: "Contents/Info.plist")
+            try FileManager.default.removeItem(at: plist)
+            #expect(mkfifo(plist.path, 0o600) == 0)
+            #expect(UpdateInstaller.bundleInfo(at: app) == nil)
+        }
+    }
+
     @Test func installRefusesUnexpectedStagedPaths() async throws {
         try await withTemporaryDirectory { root in
             let installed = try Self.installedApp(in: root, version: "0.1.0")
@@ -348,7 +363,7 @@ struct UpdateTests {
                 name: "\(UpdateInstaller.stagedPrefix)\(UUID().uuidString).app", identifier: "com.example.other")
             let lookalike = try Self.makeApp(in: root, version: "0.2.0", name: "\(UpdateInstaller.stagedPrefix)notes.app")
             let swapping = try Self.makeApp(in: root, version: "0.1.0", name: "OpenToolbox (update in progress 1A2B3C4D).app")
-            UpdateInstaller(workRoot: root.appending(path: "work")).removeLeftovers(next: installed, isOnlyCopyRunning: false)
+            UpdateInstaller(workRoot: root.appending(path: "work")).removeLeftovers(next: installed)
             #expect(FileManager.default.fileExists(atPath: swapping.path))
             #expect(!FileManager.default.fileExists(atPath: leftover.path))
             #expect(FileManager.default.fileExists(atPath: foreign.path))
@@ -630,24 +645,22 @@ struct UpdateTests {
             let installer = UpdateInstaller(workRoot: root.appending(path: "work"))
             #expect(UpdateInstaller.holdStaging(staged))
 
-            installer.removeLeftovers(next: installed, isOnlyCopyRunning: false)
+            installer.removeLeftovers(next: installed)
             #expect(FileManager.default.fileExists(atPath: staged.path))
 
             UpdateInstaller.releaseStaging(staged)
             #expect(!FileManager.default.fileExists(atPath: UpdateInstaller.stagingLease(for: staged).path))
-            installer.removeLeftovers(next: installed, isOnlyCopyRunning: false)
+            installer.removeLeftovers(next: installed)
             #expect(!FileManager.default.fileExists(atPath: staged.path))
 
             let legacy = try Self.makeApp(in: root, version: "0.2.0",
-                name: "\(UpdateInstaller.legacyStagedPrefix)\(UUID().uuidString).app")
-            installer.removeLeftovers(next: installed, isOnlyCopyRunning: false)
+                name: ".OpenToolbox-update-\(UUID().uuidString).app")
+            installer.removeLeftovers(next: installed)
             #expect(FileManager.default.fileExists(atPath: legacy.path))
-            installer.removeLeftovers(next: installed, isOnlyCopyRunning: true)
-            #expect(!FileManager.default.fileExists(atPath: legacy.path))
 
             let orphan = root.appending(path: "\(UpdateInstaller.stagedPrefix)\(UUID().uuidString).lease")
             try Data().write(to: orphan)
-            installer.removeLeftovers(next: installed, isOnlyCopyRunning: false)
+            installer.removeLeftovers(next: installed)
             #expect(!FileManager.default.fileExists(atPath: orphan.path))
             #expect(FileManager.default.fileExists(atPath: installed.path))
         }

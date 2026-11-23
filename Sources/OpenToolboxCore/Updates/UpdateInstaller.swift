@@ -56,7 +56,6 @@ public struct PreparedUpdate: Equatable, Sendable {
 /// Downloads, verifies, stages and installs a release disk image over the running app.
 public struct UpdateInstaller: Sendable {
     static let stagedPrefix = ".OpenToolbox-staged-"
-    static let legacyStagedPrefix = ".OpenToolbox-update-"
 
     private let downloader: EngineDownloader
     private let commands: UpdateCommandRunner
@@ -114,7 +113,7 @@ public struct UpdateInstaller: Sendable {
     /// Takes the quick part of the launch record. Call it as early as possible at startup.
     public static func launchRecord(at url: URL, executable: LaunchRecord.Executable) -> LaunchRecord? {
         guard let identity = fileIdentity(at: url),
-            let data = try? Data(contentsOf: url.appending(path: "Contents/Info.plist"))
+            let data = readRegularFile(url.appending(path: "Contents/Info.plist"))
         else { return nil }
         return LaunchRecord(
             url: url, identity: identity, infoPlist: HashGenerator.hash(data, algorithm: .sha256), executable: executable)
@@ -257,9 +256,8 @@ public struct UpdateInstaller: Sendable {
     }
 
     /// Removes staged copies left next to `installedApp` by an update that was never installed.
-    /// Copies that another running copy of OpenToolbox staged and still holds are left alone. Copies staged by
-    /// OpenToolbox 0.4.0 and earlier carry no lock, so they are removed only when `isOnlyCopyRunning`.
-    public func removeLeftovers(next installedApp: URL, isOnlyCopyRunning: Bool) {
+    /// Copies that another running copy of OpenToolbox staged and still holds are left alone.
+    public func removeLeftovers(next installedApp: URL) {
         let folder = installedApp.deletingLastPathComponent()
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return }
         for name in names where Self.isStagedName(name) {
@@ -270,11 +268,6 @@ public struct UpdateInstaller: Sendable {
             try? FileManager.default.removeItem(at: candidate)
             unlink(Self.stagingLease(for: candidate).path)
             close(lease)
-        }
-        for name in names where isOnlyCopyRunning && Self.isLegacyStagedName(name) {
-            let candidate = folder.appending(path: name, directoryHint: .isDirectory)
-            guard Self.bundleInfo(at: candidate)?.identifier == bundleIdentifier else { continue }
-            try? FileManager.default.removeItem(at: candidate)
         }
         for name in names where Self.isStagingLeaseName(name) {
             let lease = folder.appending(path: name, directoryHint: .notDirectory)
@@ -327,13 +320,9 @@ public struct UpdateInstaller: Sendable {
         isStagedName(name, suffix: ".lease")
     }
 
-    static func isLegacyStagedName(_ name: String) -> Bool {
-        isStagedName(name, prefix: legacyStagedPrefix, suffix: ".app")
-    }
-
-    private static func isStagedName(_ name: String, prefix: String = stagedPrefix, suffix: String) -> Bool {
-        guard name.hasPrefix(prefix), name.hasSuffix(suffix) else { return false }
-        let id = name.dropFirst(prefix.count).dropLast(suffix.count)
+    private static func isStagedName(_ name: String, suffix: String) -> Bool {
+        guard name.hasPrefix(stagedPrefix), name.hasSuffix(suffix) else { return false }
+        let id = name.dropFirst(stagedPrefix.count).dropLast(suffix.count)
         return UUID(uuidString: String(id)) != nil
     }
 
@@ -369,7 +358,7 @@ public struct UpdateInstaller: Sendable {
 
     static func bundleInfo(at app: URL) -> (identifier: String, version: AppVersion?, versionString: String?)? {
         let plist = app.appending(path: "Contents/Info.plist")
-        guard let data = try? Data(contentsOf: plist),
+        guard let data = readRegularFile(plist),
             let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
             let identifier = info["CFBundleIdentifier"] as? String
         else { return nil }
@@ -390,11 +379,12 @@ public struct UpdateInstaller: Sendable {
     /// The bundle's contents and the build identifiers of its executable, read from one open file.
     static func inspect(_ app: URL) -> (contents: BundleContents, uuids: [UUID])? {
         let plist = app.appending(path: "Contents/Info.plist")
-        guard let data = try? Data(contentsOf: plist),
+        guard let data = readRegularFile(plist),
             let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
             let name = info["CFBundleExecutable"] as? String, !name.isEmpty, !name.contains("/")
         else { return nil }
-        let descriptor = open(app.appending(path: "Contents/MacOS/\(name)").path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        let descriptor = open(
+            app.appending(path: "Contents/MacOS/\(name)").path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
         guard descriptor >= 0 else { return nil }
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         var status = stat()
@@ -404,6 +394,17 @@ public struct UpdateInstaller: Sendable {
             let digest = (try? HashGenerator.hashFile(handle, algorithms: [.sha256]) { _ in })?[.sha256]
         else { return nil }
         return (BundleContents(executable: digest, infoPlist: HashGenerator.hash(data, algorithm: .sha256)), uuids)
+    }
+
+    /// The contents of `url` when it is a regular file. Opening never waits, so a pipe or device put in its place
+    /// can't block the caller.
+    static func readRegularFile(_ url: URL) -> Data? {
+        let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard descriptor >= 0 else { return nil }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        var status = stat()
+        guard fstat(descriptor, &status) == 0, status.st_mode & S_IFMT == S_IFREG else { return nil }
+        return try? handle.readToEnd() ?? Data()
     }
 
     /// Takes an exclusive, non-blocking lock on `folder`, held until the returned descriptor is closed.

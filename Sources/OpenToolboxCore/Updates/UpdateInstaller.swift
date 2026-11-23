@@ -57,12 +57,12 @@ public struct PreparedUpdate: Equatable, Sendable {
 public struct UpdateInstaller: Sendable {
     static let stagedPrefix = ".OpenToolbox-staged-"
     static let legacyStagedPrefix = ".OpenToolbox-update-"
-    static let legacyStagedAge: TimeInterval = 7 * 24 * 60 * 60
 
     private let downloader: EngineDownloader
     private let commands: UpdateCommandRunner
     private let workRoot: URL
     private let bundleIdentifier: String
+    var willSwap: @Sendable () -> Void = {}
 
     public init(
         downloader: EngineDownloader = URLSessionEngineDownloader(),
@@ -208,11 +208,12 @@ public struct UpdateInstaller: Sendable {
         guard staged.deletingLastPathComponent() == installed.url.deletingLastPathComponent(),
             Self.isStagedName(staged.lastPathComponent),
             isVerifiedCopy(prepared)
-        else { throw UpdateError.installFailed(coreLocalized("The prepared update is missing or has changed.")) }
+        else { throw UpdateError.installFailed(Self.changedMessage) }
         guard Self.isUnchanged(installed) else { throw Self.replacedError }
 
         let swapping = staged.deletingLastPathComponent().appending(
             path: "OpenToolbox (update in progress \(UUID().uuidString.prefix(8))).app", directoryHint: .isDirectory)
+        willSwap()
         guard renamex_np(staged.path, swapping.path, UInt32(RENAME_EXCL)) == 0 else {
             throw UpdateError.installFailed(String(cString: strerror(errno)))
         }
@@ -225,6 +226,9 @@ public struct UpdateInstaller: Sendable {
         }
         let displaced = InstalledApp(url: swapping, identity: installed.identity, contents: installed.contents)
         guard Self.isUnchanged(displaced) else { throw Self.restore(swapping, to: installed.url, staged: staged) }
+        guard isVerifiedCopy(prepared, at: installed.url) else {
+            throw Self.restore(swapping, to: installed.url, staged: staged, incomingChanged: true)
+        }
         try? FileManager.default.removeItem(at: swapping)
         Self.releaseStaging(staged)
     }
@@ -237,11 +241,11 @@ public struct UpdateInstaller: Sendable {
     /// Removes the staged copy of an update that will not be installed.
     public func discard(_ prepared: PreparedUpdate) {
         let staged = prepared.stagedApp
+        defer { Self.releaseStaging(staged) }
         guard Self.isStagedName(staged.lastPathComponent),
             Self.bundleInfo(at: staged)?.identifier == bundleIdentifier
         else { return }
         try? FileManager.default.removeItem(at: staged)
-        Self.releaseStaging(staged)
     }
 
     /// The shell command that waits for `pid` to exit and then opens `app`.
@@ -253,8 +257,9 @@ public struct UpdateInstaller: Sendable {
     }
 
     /// Removes staged copies left next to `installedApp` by an update that was never installed.
-    /// Copies that another running copy of OpenToolbox staged and still holds are left alone.
-    public func removeLeftovers(next installedApp: URL) {
+    /// Copies that another running copy of OpenToolbox staged and still holds are left alone. Copies staged by
+    /// OpenToolbox 0.4.0 and earlier carry no lock, so they are removed only when `isOnlyCopyRunning`.
+    public func removeLeftovers(next installedApp: URL, isOnlyCopyRunning: Bool) {
         let folder = installedApp.deletingLastPathComponent()
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return }
         for name in names where Self.isStagedName(name) {
@@ -266,13 +271,9 @@ public struct UpdateInstaller: Sendable {
             unlink(Self.stagingLease(for: candidate).path)
             close(lease)
         }
-        for name in names where Self.isLegacyStagedName(name) {
+        for name in names where isOnlyCopyRunning && Self.isLegacyStagedName(name) {
             let candidate = folder.appending(path: name, directoryHint: .isDirectory)
-            var info = stat()
-            guard Self.bundleInfo(at: candidate)?.identifier == bundleIdentifier,
-                lstat(candidate.path, &info) == 0,
-                Date().timeIntervalSince1970 - Double(info.st_ctimespec.tv_sec) > Self.legacyStagedAge
-            else { continue }
+            guard Self.bundleInfo(at: candidate)?.identifier == bundleIdentifier else { continue }
             try? FileManager.default.removeItem(at: candidate)
         }
         for name in names where Self.isStagingLeaseName(name) {
@@ -441,23 +442,34 @@ public struct UpdateInstaller: Sendable {
 
     /// Puts back an item that turned out to be at the installed path during the swap. `displaced` has a name
     /// that startup cleanup never removes, so the item stays there if it can't be put back.
-    private static func restore(_ displaced: URL, to original: URL, staged: URL) -> UpdateError {
+    private static func restore(
+        _ displaced: URL, to original: URL, staged: URL, incomingChanged: Bool = false
+    ) -> UpdateError {
         guard renamex_np(displaced.path, original.path, UInt32(RENAME_SWAP)) == 0 else {
+            if incomingChanged {
+                return .installFailed(coreLocalized(
+                    "The update changed after it was checked, and the previous copy of OpenToolbox couldn't be put back. It was kept at \(displaced.path). Download OpenToolbox from GitHub and install it again."))
+            }
             return .installFailed(coreLocalized(
                 "Another app was found in place of OpenToolbox during the update. It was kept at \(displaced.path)."))
         }
+        let reason = incomingChanged ? changedMessage : replacedMessage
         guard renamex_np(displaced.path, staged.path, UInt32(RENAME_EXCL)) == 0 else {
-            return .installFailed(updateLeftNote(replacedMessage, at: displaced))
+            return .installFailed(updateLeftNote(reason, at: displaced))
         }
-        return replacedError
+        return .installFailed(reason)
+    }
+
+    private static var changedMessage: String {
+        coreLocalized("The prepared update is missing or has changed.")
     }
 
     private static func updateLeftNote(_ reason: String, at location: URL) -> String {
         coreLocalized("\(reason) The downloaded update was left at \(location.path).")
     }
 
-    private func isVerifiedCopy(_ prepared: PreparedUpdate) -> Bool {
-        let app = prepared.stagedApp
+    private func isVerifiedCopy(_ prepared: PreparedUpdate, at location: URL? = nil) -> Bool {
+        let app = location ?? prepared.stagedApp
         let values = try? app.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard values?.isDirectory == true, values?.isSymbolicLink == false,
             let info = Self.bundleInfo(at: app), info.identifier == bundleIdentifier,

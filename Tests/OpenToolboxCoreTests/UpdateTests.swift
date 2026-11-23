@@ -202,6 +202,27 @@ struct UpdateTests {
         }
     }
 
+    @Test func installPutsTheOldAppBackWhenTheUpdateChangesDuringTheSwap() async throws {
+        try await withTemporaryDirectory { root in
+            let installed = try Self.installedApp(in: root, version: "0.1.0")
+            let prepared = try await Self.stagedUpdate(for: installed, version: "0.2.0")
+            let executable = prepared.stagedApp.appending(path: "Contents/MacOS/OpenToolbox")
+            var installer = UpdateInstaller(workRoot: root.appending(path: "work"))
+            installer.willSwap = {
+                try? FileManager.default.removeItem(at: executable)
+                try? FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/echo"), to: executable)
+            }
+
+            #expect(throws: UpdateError.installFailed("The prepared update is missing or has changed.")) {
+                try installer.install(prepared)
+            }
+            #expect(UpdateInstaller.contents(of: installed.url) == installed.contents)
+            #expect(UpdateInstaller.bundleInfo(at: prepared.stagedApp)?.version == AppVersion("0.2.0"))
+            let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+            #expect(!names.contains { $0.hasPrefix("OpenToolbox (update in progress") })
+        }
+    }
+
     @Test func installRefusesUnexpectedStagedPaths() async throws {
         try await withTemporaryDirectory { root in
             let installed = try Self.installedApp(in: root, version: "0.1.0")
@@ -327,7 +348,7 @@ struct UpdateTests {
                 name: "\(UpdateInstaller.stagedPrefix)\(UUID().uuidString).app", identifier: "com.example.other")
             let lookalike = try Self.makeApp(in: root, version: "0.2.0", name: "\(UpdateInstaller.stagedPrefix)notes.app")
             let swapping = try Self.makeApp(in: root, version: "0.1.0", name: "OpenToolbox (update in progress 1A2B3C4D).app")
-            UpdateInstaller(workRoot: root.appending(path: "work")).removeLeftovers(next: installed)
+            UpdateInstaller(workRoot: root.appending(path: "work")).removeLeftovers(next: installed, isOnlyCopyRunning: false)
             #expect(FileManager.default.fileExists(atPath: swapping.path))
             #expect(!FileManager.default.fileExists(atPath: leftover.path))
             #expect(FileManager.default.fileExists(atPath: foreign.path))
@@ -609,22 +630,24 @@ struct UpdateTests {
             let installer = UpdateInstaller(workRoot: root.appending(path: "work"))
             #expect(UpdateInstaller.holdStaging(staged))
 
-            installer.removeLeftovers(next: installed)
+            installer.removeLeftovers(next: installed, isOnlyCopyRunning: false)
             #expect(FileManager.default.fileExists(atPath: staged.path))
 
             UpdateInstaller.releaseStaging(staged)
             #expect(!FileManager.default.fileExists(atPath: UpdateInstaller.stagingLease(for: staged).path))
-            installer.removeLeftovers(next: installed)
+            installer.removeLeftovers(next: installed, isOnlyCopyRunning: false)
             #expect(!FileManager.default.fileExists(atPath: staged.path))
 
             let legacy = try Self.makeApp(in: root, version: "0.2.0",
                 name: "\(UpdateInstaller.legacyStagedPrefix)\(UUID().uuidString).app")
-            installer.removeLeftovers(next: installed)
+            installer.removeLeftovers(next: installed, isOnlyCopyRunning: false)
             #expect(FileManager.default.fileExists(atPath: legacy.path))
+            installer.removeLeftovers(next: installed, isOnlyCopyRunning: true)
+            #expect(!FileManager.default.fileExists(atPath: legacy.path))
 
             let orphan = root.appending(path: "\(UpdateInstaller.stagedPrefix)\(UUID().uuidString).lease")
             try Data().write(to: orphan)
-            installer.removeLeftovers(next: installed)
+            installer.removeLeftovers(next: installed, isOnlyCopyRunning: false)
             #expect(!FileManager.default.fileExists(atPath: orphan.path))
             #expect(FileManager.default.fileExists(atPath: installed.path))
         }

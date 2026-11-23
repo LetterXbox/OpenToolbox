@@ -280,7 +280,7 @@ final class StubInstaller: UpdateInstalling, @unchecked Sendable {
         pending?.resume()
     }
 
-    func removeLeftovers(next installedApp: URL) {}
+    func removeLeftovers(next installedApp: URL, isOnlyCopyRunning: Bool) {}
 
     func removeStaleWork() async {}
 

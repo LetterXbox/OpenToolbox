@@ -4,7 +4,7 @@ import Observation
 import OpenToolboxCore
 
 protocol UpdateInstalling: Sendable {
-    func removeLeftovers(next installedApp: URL)
+    func removeLeftovers(next installedApp: URL, isOnlyCopyRunning: Bool)
     func removeStaleWork() async
     func prepare(
         _ update: AppUpdate, replacing installed: InstalledApp, progress: @escaping @Sendable (Double) -> Void
@@ -87,6 +87,7 @@ final class UpdateCenter {
     private let installer: (any UpdateInstalling)?
     private let check: UpdateCheck
     private var task: Task<Void, Never>?
+    private var relaunchApp: URL?
     private var launchRecord: Task<InstalledApp?, Never>?
     private var timer: Timer?
 
@@ -125,7 +126,12 @@ final class UpdateCenter {
 
         let record = unsupportedReason == nil
             ? runningExecutable.flatMap { UpdateInstaller.launchRecord(at: appURL, executable: $0) } : nil
-        if unsupportedReason == nil { installer?.removeLeftovers(next: appURL) }
+        if unsupportedReason == nil {
+            let others = bundle.bundleIdentifier.map {
+                NSRunningApplication.runningApplications(withBundleIdentifier: $0).filter { $0 != .current }
+            } ?? []
+            installer?.removeLeftovers(next: appURL, isOnlyCopyRunning: others.isEmpty)
+        }
         let installer = installer
         launchRecord = Task.detached {
             let installed = record.flatMap(UpdateInstaller.installedApp(completing:))
@@ -211,7 +217,7 @@ final class UpdateCenter {
         task?.cancel()
     }
 
-    /// Installs the prepared update and reopens the new version.
+    /// Installs the prepared update, then quits so the new version opens once OpenToolbox has exited.
     func restartNow() {
         guard case .ready(let prepared) = phase, let installer else { return }
         do {
@@ -221,19 +227,26 @@ final class UpdateCenter {
             phase = .notInstalled(Self.installProblem(error))
             return
         }
-        let command = UpdateInstaller.relaunchCommand(
-            waitingFor: ProcessInfo.processInfo.processIdentifier, app: prepared.installedApp)
+        phase = .installedNeedsRelaunch(prepared.version)
+        relaunchApp = prepared.installedApp
+        NSApp.terminate(nil)
+    }
+
+    /// Forgets a pending relaunch after quitting was cancelled.
+    func cancelRelaunch() {
+        relaunchApp = nil
+    }
+
+    /// Starts the helper that reopens the installed update once this process exits. Call it only once quitting
+    /// can no longer be cancelled.
+    func relaunchAfterQuit() {
+        guard let app = relaunchApp else { return }
+        relaunchApp = nil
+        let command = UpdateInstaller.relaunchCommand(waitingFor: ProcessInfo.processInfo.processIdentifier, app: app)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: command.executable)
         process.arguments = command.arguments
-        do {
-            try process.run()
-        } catch {
-            phase = .installedNeedsRelaunch(prepared.version)
-            return
-        }
-        phase = .idle
-        NSApp.terminate(nil)
+        try? process.run()
     }
 
     /// Installs a prepared update without reopening, used when the app quits.

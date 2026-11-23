@@ -100,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard RecordingSessions.isRecording else { return .terminateNow }
         Task {
             let finished = await RecordingSessions.stopAll()
+            if !finished { updates.cancelRelaunch() }
             sender.reply(toApplicationShouldTerminate: finished)
             if !finished {
                 let alert = NSAlert()
@@ -113,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         updates.installOnQuit()
+        updates.relaunchAfterQuit()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

@@ -1,4 +1,5 @@
 import Darwin
+import DiskArbitration
 import Foundation
 
 public enum DiskSpeedError: Error, Equatable, LocalizedError {
@@ -38,12 +39,14 @@ public enum DiskSpeedError: Error, Equatable, LocalizedError {
     }
 }
 
-/// What identifies a mounted volume: its file system ID, its volume UUID when it has one, and its size.
-/// A different drive mounted at the same path differs in at least one of them.
+/// What identifies a mounted volume: its file system ID, its volume UUID when it has one, the device it is
+/// mounted from, and when macOS attached that device. A clone attached in the drive's place appears at a
+/// different time, while remounting or resizing the same drive keeps every field.
 public struct VolumeIdentity: Hashable, Sendable {
     public let fileSystemID: UInt64
     public let uuid: String?
-    public let totalBytes: Int64
+    public let device: String
+    public let appeared: Double?
 }
 
 /// A mounted volume that can be speed-tested.
@@ -125,7 +128,16 @@ public enum DiskSpeedTest {
     static func identity(_ stats: statfs, uuid: String?) -> VolumeIdentity {
         let fileSystemID =
             UInt64(UInt32(bitPattern: stats.f_fsid.val.0)) << 32 | UInt64(UInt32(bitPattern: stats.f_fsid.val.1))
-        return VolumeIdentity(fileSystemID: fileSystemID, uuid: uuid, totalBytes: Int64(stats.f_blocks) * Int64(stats.f_bsize))
+        let device = withUnsafeBytes(of: stats.f_mntfromname) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        return VolumeIdentity(fileSystemID: fileSystemID, uuid: uuid, device: device, appeared: appearanceTime(of: device))
+    }
+
+    static func appearanceTime(of device: String) -> Double? {
+        guard device.hasPrefix("/dev/"), let session = DASessionCreate(kCFAllocatorDefault),
+            let disk = DADiskCreateFromBSDName(kCFAllocatorDefault, session, device),
+            let description = DADiskCopyDescription(disk) as? [String: Any]
+        else { return nil }
+        return (description["DAAppearanceTime"] as? NSNumber)?.doubleValue
     }
 
     static func volumeUUID(of directory: URL) -> String? {

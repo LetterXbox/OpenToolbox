@@ -420,9 +420,12 @@ public final class EngineStore: Sendable {
     }
 
     private static func tryLock(_ lock: FileHandle) throws -> Bool {
-        if flock(lock.fileDescriptor, LOCK_EX | LOCK_NB) == 0 { return true }
-        if errno == EWOULDBLOCK || errno == EINTR { return false }
-        throw EngineDirectory.posixError()
+        while true {
+            if flock(lock.fileDescriptor, LOCK_EX | LOCK_NB) == 0 { return true }
+            if errno == EINTR { continue }
+            if errno == EWOULDBLOCK { return false }
+            throw EngineDirectory.posixError()
+        }
     }
 
     private static func requireIdentity(_ directory: EngineDirectory, named name: String, in parent: EngineDirectory) throws {

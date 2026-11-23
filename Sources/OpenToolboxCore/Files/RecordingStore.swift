@@ -24,6 +24,14 @@ public struct RecordingStore: Sendable {
         let inode: UInt64
     }
 
+    /// A recording captured straight into the store's hidden captures folder. Its lock marks it as still being
+    /// recorded; a capture whose lock is free was interrupted and is moved into the store as a kept recording.
+    public struct Capture: Sendable {
+        public let url: URL
+        let tool: ToolID
+        let lease: Int32
+    }
+
     public struct SaveResult: Sendable {
         public let url: URL
         /// Set when the recording was saved but its kept copy couldn't be removed.
@@ -75,6 +83,80 @@ public struct RecordingStore: Sendable {
         return folder
     }
 
+    static let capturesFolder = ".captures"
+
+    func openCaptures(in folder: Int32, create: Bool) -> Int32? {
+        if create, mkdirat(folder, Self.capturesFolder, 0o700) != 0, errno != EEXIST { return nil }
+        let captures = openat(folder, Self.capturesFolder, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        return captures >= 0 ? captures : nil
+    }
+
+    /// Starts a capture inside the store, or returns `nil` when the store can't be used.
+    public func beginCapture(for tool: ToolID, extension fileExtension: String) -> Capture? {
+        guard let folder = try? openFolder(for: tool, create: true) else { return nil }
+        defer { close(folder) }
+        guard let captures = openCaptures(in: folder, create: true) else { return nil }
+        defer { close(captures) }
+        let id = UUID().uuidString
+        let lease = openat(
+            captures, "\(id).lease", O_RDWR | O_CREAT | O_EXCL | O_EXLOCK | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard lease >= 0 else { return nil }
+        let url = self.folder(for: tool).appending(path: Self.capturesFolder, directoryHint: .isDirectory)
+            .appending(path: "\(id).\(fileExtension)", directoryHint: .notDirectory)
+        return Capture(url: url, tool: tool, lease: lease)
+    }
+
+    /// Releases a capture once its recording has been saved, kept or removed.
+    public func endCapture(_ capture: Capture) {
+        if let folder = try? openFolder(for: capture.tool, create: false) {
+            if let captures = openCaptures(in: folder, create: false) {
+                unlinkat(captures, capture.url.deletingPathExtension().lastPathComponent + ".lease", 0)
+                close(captures)
+            }
+            close(folder)
+        }
+        close(capture.lease)
+        notify()
+    }
+
+    /// Moves interrupted captures into the store as kept recordings, removes empty ones and free locks.
+    func recoverCaptures(in folder: Int32) {
+        guard let captures = openCaptures(in: folder, create: false) else { return }
+        defer { close(captures) }
+        for name in Self.names(in: captures) {
+            guard let dot = name.lastIndex(of: "."), UUID(uuidString: String(name[..<dot])) != nil else { continue }
+            let fileExtension = String(name[name.index(after: dot)...])
+            let leaseName = "\(name[..<dot]).lease"
+            let lease = openat(captures, leaseName, O_RDWR | O_CREAT | O_EXLOCK | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC, 0o600)
+            guard lease >= 0 else { continue }
+            defer {
+                unlinkat(captures, leaseName, 0)
+                close(lease)
+            }
+            var info = stat()
+            guard fileExtension != "lease", fstatat(captures, name, &info, AT_SYMLINK_NOFOLLOW) == 0,
+                (info.st_mode & S_IFMT) == S_IFREG
+            else { continue }
+            if info.st_size == 0 {
+                unlinkat(captures, name, 0)
+            } else {
+                _ = Self.move(name, from: captures, into: folder, preferring: "Interrupted Recording.\(fileExtension)")
+            }
+        }
+    }
+
+    /// Moves `source` into `folder` under `name`, or a numbered variant of it, without replacing anything.
+    /// Returns the name used.
+    static func move(_ source: String, from sourceFolder: Int32, into folder: Int32, preferring name: String) -> String? {
+        let base = OutputDirectory.sanitizedFileName(name)
+        for counter in 1...OutputDirectory.maximumNumberedNames {
+            let candidate = counter == 1 ? base : OutputDirectory.numberedName(base, counter)
+            if renameatx_np(sourceFolder, source, folder, candidate, UInt32(RENAME_EXCL)) == 0 { return candidate }
+            guard errno == EEXIST else { return nil }
+        }
+        return nil
+    }
+
     static func identity(of name: String, in folder: Int32) -> (device: UInt64, inode: UInt64, created: Double)? {
         var info = stat()
         guard fstatat(folder, name, &info, AT_SYMLINK_NOFOLLOW) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
@@ -119,15 +201,8 @@ public struct RecordingStore: Sendable {
         defer { notify() }
         guard let folder = try? openFolder(for: tool, create: true) else { return recording }
         defer { close(folder) }
-        let base = OutputDirectory.sanitizedFileName(name)
-        for counter in 1...OutputDirectory.maximumNumberedNames {
-            let candidate = counter == 1 ? base : OutputDirectory.numberedName(base, counter)
-            if renameatx_np(AT_FDCWD, recording.path, folder, candidate, UInt32(RENAME_EXCL)) == 0 {
-                return self.folder(for: tool).appending(path: candidate, directoryHint: .notDirectory)
-            }
-            guard errno == EEXIST else { return recording }
-        }
-        return recording
+        guard let kept = Self.move(recording.path, from: AT_FDCWD, into: folder, preferring: name) else { return recording }
+        return self.folder(for: tool).appending(path: kept, directoryHint: .notDirectory)
     }
 
     /// Kept recordings of `tools`, oldest first. Only regular files directly in the store count.
@@ -135,6 +210,7 @@ public struct RecordingStore: Sendable {
         tools.flatMap { tool -> [(Entry, Double)] in
             guard let folder = try? openFolder(for: tool, create: false) else { return [] }
             defer { close(folder) }
+            recoverCaptures(in: folder)
             return Self.names(in: folder).compactMap { name -> (Entry, Double)? in
                 guard !name.hasPrefix("."), let identity = Self.identity(of: name, in: folder) else { return nil }
                 let entry = Entry(
@@ -196,11 +272,27 @@ public struct RecordingStore: Sendable {
         }
     }
 
+    /// Moves the entry to a private name, checks that what moved is the kept recording, and only then unlinks it.
+    /// Anything else that turns out to be there is moved back.
     func remove(_ entry: Entry, in folder: Int32) -> String? {
+        let notARecording = StoreError.notARecording(entry.name).localizedDescription
         guard let identity = Self.identity(of: entry.name, in: folder),
             identity.device == entry.device, identity.inode == entry.inode
-        else { return StoreError.notARecording(entry.name).localizedDescription }
-        guard unlinkat(folder, entry.name, 0) == 0 else { return String(cString: strerror(errno)) }
+        else { return notARecording }
+        let staged = ".discard-\(UUID().uuidString)"
+        guard renameatx_np(folder, entry.name, folder, staged, UInt32(RENAME_EXCL)) == 0 else {
+            return String(cString: strerror(errno))
+        }
+        guard let moved = Self.identity(of: staged, in: folder), moved.device == entry.device, moved.inode == entry.inode
+        else {
+            _ = Self.move(staged, from: folder, into: folder, preferring: entry.name)
+            return notARecording
+        }
+        guard unlinkat(folder, staged, 0) == 0 else {
+            let reason = String(cString: strerror(errno))
+            _ = Self.move(staged, from: folder, into: folder, preferring: entry.name)
+            return reason
+        }
         return nil
     }
 

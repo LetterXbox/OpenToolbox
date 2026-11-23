@@ -11,6 +11,7 @@ protocol UpdateInstalling: Sendable {
     ) async throws -> PreparedUpdate
     func install(_ prepared: PreparedUpdate) throws
     func discard(_ prepared: PreparedUpdate)
+    func abandon(_ prepared: PreparedUpdate)
 }
 
 extension UpdateInstaller: UpdateInstalling {}
@@ -28,6 +29,8 @@ final class UpdateCenter {
         case downloading(AppUpdate, Double)
         case ready(PreparedUpdate)
         case failed(String)
+        case notInstalled(String)
+        case installedNeedsRelaunch(AppVersion)
     }
 
     private(set) var phase: Phase = .idle
@@ -83,7 +86,9 @@ final class UpdateCenter {
     private let appURL: URL
     private let installer: (any UpdateInstalling)?
     private let check: UpdateCheck
+    private let terminate: @MainActor () -> Void
     private var task: Task<Void, Never>?
+    private var relaunchApp: URL?
     private var launchRecord: Task<InstalledApp?, Never>?
     private var timer: Timer?
 
@@ -104,10 +109,13 @@ final class UpdateCenter {
         defaults: UserDefaults = .standard,
         bundle: Bundle = .main,
         installer: (any UpdateInstalling)? = (try? UpdateInstaller.defaultWorkRoot()).map { UpdateInstaller(workRoot: $0) },
-        check: @escaping UpdateCheck = UpdateCenter.liveCheck
+        check: @escaping UpdateCheck = UpdateCenter.liveCheck,
+        runningExecutable: LaunchRecord.Executable? = UpdateInstaller.runningExecutable(),
+        terminate: @escaping @MainActor () -> Void = { NSApp.terminate(nil) }
     ) {
         self.defaults = defaults
         self.check = check
+        self.terminate = terminate
         appURL = bundle.bundleURL
         let version = (bundle.infoDictionary?["CFBundleShortVersionString"] as? String).flatMap(AppVersion.init)
         currentVersion = version
@@ -119,12 +127,12 @@ final class UpdateCenter {
         lastAutomaticAttempt = defaults.object(forKey: Self.lastAutomaticAttemptKey) as? Date
         self.installer = installer
 
+        let record = unsupportedReason == nil
+            ? runningExecutable.flatMap { UpdateInstaller.launchRecord(at: appURL, executable: $0) } : nil
         if unsupportedReason == nil { installer?.removeLeftovers(next: appURL) }
         let installer = installer
-        let appURL = appURL
-        let supported = unsupportedReason == nil
         launchRecord = Task.detached {
-            let installed = supported ? UpdateInstaller.installedApp(at: appURL) : nil
+            let installed = record.flatMap(UpdateInstaller.installedApp(completing:))
             await installer?.removeStaleWork()
             return installed
         }
@@ -133,7 +141,7 @@ final class UpdateCenter {
         }
         if let notice = defaults.string(forKey: Self.installNoticeKey) {
             defaults.removeObject(forKey: Self.installNoticeKey)
-            phase = .failed(L("The update could not be installed when OpenToolbox quit: \(notice)"))
+            phase = .notInstalled(L("OpenToolbox tried to install it when it last quit. \(notice)"))
             hasLaunchNotice = true
         } else {
             checkIfDue()
@@ -159,8 +167,10 @@ final class UpdateCenter {
     /// Checks GitHub now. A user-initiated check reports its result in the Software Update window.
     func checkNow(userInitiated: Bool) {
         guard let currentVersion, !isBusy else { return }
+        if case .installedNeedsRelaunch = phase { return }
         if case .ready(let prepared) = phase {
             if FileManager.default.fileExists(atPath: prepared.stagedApp.path) { return }
+            installer?.abandon(prepared)
             phase = .idle
         }
         if !userInitiated { recordAutomaticAttempt() }
@@ -177,7 +187,7 @@ final class UpdateCenter {
                 recordCheck()
                 switch result {
                 case .upToDate(let latest):
-                    phase = .upToDate(max(latest, currentVersion))
+                    phase = .upToDate(latest)
                 case .available(let update) where !isWanted(update.version):
                     phase = .idle
                 case .available(let update):
@@ -206,22 +216,36 @@ final class UpdateCenter {
         task?.cancel()
     }
 
-    /// Installs the prepared update and reopens the new version.
+    /// Installs the prepared update, then quits so the new version opens once OpenToolbox has exited.
     func restartNow() {
         guard case .ready(let prepared) = phase, let installer else { return }
         do {
             try installer.install(prepared)
-            phase = .idle
-            let command = UpdateInstaller.relaunchCommand(
-                waitingFor: ProcessInfo.processInfo.processIdentifier, app: prepared.installedApp)
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: command.executable)
-            process.arguments = command.arguments
-            try process.run()
-            NSApp.terminate(nil)
         } catch {
-            phase = .failed(error.localizedDescription)
+            installer.abandon(prepared)
+            phase = .notInstalled(Self.installProblem(error))
+            return
         }
+        phase = .installedNeedsRelaunch(prepared.version)
+        relaunchApp = prepared.installedApp
+        terminate()
+    }
+
+    /// Forgets a pending relaunch after quitting was cancelled.
+    func cancelRelaunch() {
+        relaunchApp = nil
+    }
+
+    /// Starts the helper that reopens the installed update once this process exits. Call it only once quitting
+    /// can no longer be cancelled.
+    func relaunchAfterQuit() {
+        guard let app = relaunchApp else { return }
+        relaunchApp = nil
+        let command = UpdateInstaller.relaunchCommand(waitingFor: ProcessInfo.processInfo.processIdentifier, app: app)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: command.executable)
+        process.arguments = command.arguments
+        try? process.run()
     }
 
     /// Installs a prepared update without reopening, used when the app quits.
@@ -233,13 +257,26 @@ final class UpdateCenter {
         do {
             try installer.install(prepared)
         } catch {
-            defaults.set(error.localizedDescription, forKey: Self.installNoticeKey)
+            defaults.set(Self.installProblem(error), forKey: Self.installNoticeKey)
         }
         phase = .idle
     }
 
+    /// The line under "up to date": the latest release, or that nothing newer exists when this copy is newer.
+    func upToDateDetail(latest: AppVersion) -> String {
+        if let currentVersion, currentVersion > latest || latest.isPrerelease {
+            return L("You have version \(currentVersion.description). No newer version is available.")
+        }
+        return L("Version \(latest.description) is the latest release.")
+    }
+
     func openReleasePage(for update: AppUpdate?) {
         NSWorkspace.shared.open(update?.releasePage ?? UpdateFeed.releasesPage)
+    }
+
+    private static func installProblem(_ error: Error) -> String {
+        if case UpdateError.installFailed(let detail) = error { return detail }
+        return error.localizedDescription
     }
 
     private func checkIfDue() {
@@ -321,7 +358,7 @@ final class UpdateCenter {
             guard let installed = await launchRecord?.value ?? nil else {
                 phase = automatic || !isWanted(update.version)
                     ? offer(update)
-                    : .failed(L("OpenToolbox couldn't read its own app bundle when it opened. Quit and reopen OpenToolbox, then try again."))
+                    : .notInstalled(L("OpenToolbox couldn't read its own app bundle when it opened. Quit and reopen OpenToolbox, then try again."))
                 return
             }
             do {
@@ -339,7 +376,7 @@ final class UpdateCenter {
                 if Task.isCancelled || automatic || !isWanted(update.version) {
                     phase = offer(update)
                 } else {
-                    phase = .failed(error.localizedDescription)
+                    phase = .notInstalled(Self.installProblem(error))
                 }
             }
         }

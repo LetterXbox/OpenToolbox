@@ -31,3 +31,5 @@ Both judges worked separately from the same brief, read-only, at `654f480`.
 ## Follow-up
 
 Bind the launch record to the running process: capture the bundle's identity synchronously at startup and check that the executable on disk is the one running (for example by the running image's `LC_UUID` or code directory hash), with a test that delays the read and replaces the destination. Listed in the README's known limitations until then.
+
+**Status:** done in v0.4.1. The launch record takes the bundle's identity and `Info.plist` digest synchronously at startup, and the background read refuses the bundle unless its executable contains the running build's `LC_UUID`, read from the same open file that is hashed. `aLaunchRecordRefusesAnAppReplacedBeforeItsExecutableIsRead` replaces the executable, then the whole bundle, after the record is taken and checks that both are refused.

@@ -202,6 +202,42 @@ struct UpdateTests {
         }
     }
 
+    @Test func installPutsTheOldAppBackWhenTheUpdateChangesDuringTheSwap() async throws {
+        try await withTemporaryDirectory { root in
+            let installed = try Self.installedApp(in: root, version: "0.1.0")
+            let prepared = try await Self.stagedUpdate(for: installed, version: "0.2.0")
+            let executable = prepared.stagedApp.appending(path: "Contents/MacOS/OpenToolbox")
+            var installer = UpdateInstaller(workRoot: root.appending(path: "work"))
+            installer.willSwap = {
+                try? FileManager.default.removeItem(at: executable)
+                try? FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/echo"), to: executable)
+            }
+
+            #expect(throws: UpdateError.installFailed("The prepared update is missing or has changed.")) {
+                try installer.install(prepared)
+            }
+            #expect(UpdateInstaller.contents(of: installed.url) == installed.contents)
+            #expect(UpdateInstaller.bundleInfo(at: prepared.stagedApp)?.version == AppVersion("0.2.0"))
+            let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+            #expect(!names.contains { $0.hasPrefix("OpenToolbox (update in progress") })
+        }
+    }
+
+    @Test func aPipeInPlaceOfABundleFileIsRefusedWithoutWaiting() throws {
+        try withTemporaryDirectorySync { root in
+            let app = try Self.makeApp(in: root, version: "0.1.0")
+            let executable = app.appending(path: "Contents/MacOS/OpenToolbox")
+            try FileManager.default.removeItem(at: executable)
+            #expect(mkfifo(executable.path, 0o600) == 0)
+            #expect(UpdateInstaller.contents(of: app) == nil)
+
+            let plist = app.appending(path: "Contents/Info.plist")
+            try FileManager.default.removeItem(at: plist)
+            #expect(mkfifo(plist.path, 0o600) == 0)
+            #expect(UpdateInstaller.bundleInfo(at: app) == nil)
+        }
+    }
+
     @Test func installRefusesUnexpectedStagedPaths() async throws {
         try await withTemporaryDirectory { root in
             let installed = try Self.installedApp(in: root, version: "0.1.0")
@@ -550,6 +586,127 @@ struct UpdateTests {
             sizeBytes: size, sha256: sha256)
     }
 
+    @Test func pathsWithNoExistingFolderBelowTheRootStillResolve() {
+        let missing = "/OpenToolboxTests-\(UUID().uuidString)"
+        #expect(UpdateInstaller.resolved(missing + "/./a/../update.dmg") == missing + "/update.dmg")
+    }
+
+    @Test func abandonedPendingWorkIsRemovedAndLiveWorkIsKept() async throws {
+        try await withTemporaryDirectory { root in
+            let work = root.appending(path: "work", directoryHint: .isDirectory)
+            func pending(age: TimeInterval) throws -> URL {
+                let folder = work.appending(path: ".pending-\(UUID().uuidString)", directoryHint: .isDirectory)
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try FileManager.default.setAttributes(
+                    [.modificationDate: Date(timeIntervalSinceNow: -age)], ofItemAtPath: folder.path)
+                return folder
+            }
+            let abandoned = try pending(age: 3600)
+            let fresh = try pending(age: 0)
+            let held = try pending(age: 0)
+            let lease = try #require(UpdateInstaller.lease(held))
+            defer { close(lease) }
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date(timeIntervalSinceNow: -3600)], ofItemAtPath: held.path)
+
+            await UpdateInstaller(commands: FixedInventory([:]), workRoot: work).removeStaleWork()
+            #expect(!FileManager.default.fileExists(atPath: abandoned.path))
+            #expect(FileManager.default.fileExists(atPath: fresh.path))
+            #expect(FileManager.default.fileExists(atPath: held.path))
+        }
+    }
+
+    @Test func imagesListedWithoutAPathKeepTheirWorkFolder() async throws {
+        try await withTemporaryDirectory { root in
+            let work = root.appending(path: "work", directoryHint: .isDirectory)
+            let interrupted = work.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+            let mountPoint = interrupted.appending(path: "mount/OpenToolbox", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: true)
+
+            for entity: [String: Any] in [
+                ["mount-point": mountPoint.path],
+                ["mount-point": mountPoint.path, "dev-entry": "/dev/disk99s1"],
+            ] {
+                let inventory: [String: Any] = ["images": [["system-entities": [entity]]]]
+                await UpdateInstaller(commands: FixedInventory(inventory), workRoot: work).removeStaleWork()
+                #expect(FileManager.default.fileExists(atPath: interrupted.path))
+            }
+            let elsewhere: [String: Any] = ["images": [["system-entities": [["mount-point": "/Volumes/Other"]]]]]
+            await UpdateInstaller(commands: FixedInventory(elsewhere), workRoot: work).removeStaleWork()
+            #expect(!FileManager.default.fileExists(atPath: interrupted.path))
+        }
+    }
+
+    @Test func aStagedCopyHeldByARunningCopyIsLeftAlone() throws {
+        try withTemporaryDirectorySync { root in
+            let installed = try Self.makeApp(in: root, version: "0.1.0")
+            let staged = try Self.makeApp(in: root, version: "0.2.0",
+                name: "\(UpdateInstaller.stagedPrefix)\(UUID().uuidString).app")
+            let installer = UpdateInstaller(workRoot: root.appending(path: "work"))
+            #expect(UpdateInstaller.holdStaging(staged))
+
+            installer.removeLeftovers(next: installed)
+            #expect(FileManager.default.fileExists(atPath: staged.path))
+
+            UpdateInstaller.releaseStaging(staged)
+            #expect(!FileManager.default.fileExists(atPath: UpdateInstaller.stagingLease(for: staged).path))
+            installer.removeLeftovers(next: installed)
+            #expect(!FileManager.default.fileExists(atPath: staged.path))
+
+            let legacy = try Self.makeApp(in: root, version: "0.2.0",
+                name: ".OpenToolbox-update-\(UUID().uuidString).app")
+            installer.removeLeftovers(next: installed)
+            #expect(FileManager.default.fileExists(atPath: legacy.path))
+
+            let orphan = root.appending(path: "\(UpdateInstaller.stagedPrefix)\(UUID().uuidString).lease")
+            try Data().write(to: orphan)
+            installer.removeLeftovers(next: installed)
+            #expect(!FileManager.default.fileExists(atPath: orphan.path))
+            #expect(FileManager.default.fileExists(atPath: installed.path))
+        }
+    }
+
+    @Test func executablesReportTheBuildOfEachArchitecture() async throws {
+        try await withTemporaryDirectory { root in
+            let executable = try await Self.makeUniversalExecutable(in: root)
+            let handle = try FileHandle(forReadingFrom: executable)
+            defer { try? handle.close() }
+            let builds = MachOImage.uuids(of: handle)
+            #expect(builds.count == 2)
+            #expect(Set(builds).count == 2)
+            #expect(MachOImage.runningUUID() != nil)
+            let text = root.appending(path: "text")
+            try Data("not an executable".utf8).write(to: text)
+            #expect(MachOImage.uuids(of: try FileHandle(forReadingFrom: text)).isEmpty)
+        }
+    }
+
+    @Test func aLaunchRecordRefusesAnAppReplacedBeforeItsExecutableIsRead() async throws {
+        try await withTemporaryDirectory { root in
+            let running = try await Self.makeUniversalExecutable(in: root, exitCode: 0)
+            let other = try await Self.makeUniversalExecutable(in: root, exitCode: 1)
+            let build = try #require(MachOImage.uuids(of: try FileHandle(forReadingFrom: running)).first)
+            let app = try Self.makeApp(in: root, version: "0.4.1", executable: running)
+            let executable = app.appending(path: "Contents/MacOS/OpenToolbox")
+
+            let record = try #require(UpdateInstaller.launchRecord(at: app, executable: .running(build)))
+            #expect(UpdateInstaller.installedApp(completing: record) != nil)
+
+            try FileManager.default.removeItem(at: executable)
+            try FileManager.default.copyItem(at: other, to: executable)
+            #expect(UpdateInstaller.installedApp(completing: record) == nil)
+
+            let replaced = try #require(UpdateInstaller.launchRecord(at: app, executable: .running(build)))
+            try FileManager.default.removeItem(at: app)
+            try Self.makeApp(in: root, version: "0.4.1", executable: running)
+            #expect(UpdateInstaller.installedApp(completing: replaced) == nil)
+
+            let unchecked = try #require(UpdateInstaller.launchRecord(at: app, executable: .unchecked))
+            try Data("<plist/>".utf8).write(to: app.appending(path: "Contents/Info.plist"))
+            #expect(UpdateInstaller.installedApp(completing: unchecked) == nil)
+        }
+    }
+
     static func installedApp(in folder: URL, version: String) throws -> InstalledApp {
         let app = try makeApp(in: folder, version: version)
         return try #require(UpdateInstaller.installedApp(at: app))
@@ -574,10 +731,10 @@ struct UpdateTests {
             "/usr/bin/codesign", arguments: ["--force", "--deep", "--sign", "-", app.path])
     }
 
-    static func makeUniversalExecutable(in folder: URL) async throws -> URL {
-        let source = folder.appending(path: "main.c")
-        try Data("int main(void) { return 0; }\n".utf8).write(to: source)
-        let executable = folder.appending(path: "universal")
+    static func makeUniversalExecutable(in folder: URL, exitCode: Int = 0) async throws -> URL {
+        let source = folder.appending(path: "main-\(exitCode).c")
+        try Data("int main(void) { return \(exitCode); }\n".utf8).write(to: source)
+        let executable = folder.appending(path: "universal-\(exitCode)")
         _ = try await SystemUpdateCommandRunner().run("/usr/bin/xcrun", arguments: [
             "clang", "-arch", "arm64", "-arch", "x86_64", source.path, "-o", executable.path,
         ])
@@ -670,7 +827,7 @@ final class CancelAfterAttach: UpdateCommandRunner, @unchecked Sendable {
 
     func run(_ executable: String, arguments: [String]) async throws -> Data {
         let output = try await system.run(executable, arguments: arguments)
-        if arguments.first == "attach" {
+        if arguments.contains("attach") {
             while lock.withLock({ target }) == nil { try await Task.sleep(for: .milliseconds(10)) }
             lock.withLock { target }?.cancel()
         }

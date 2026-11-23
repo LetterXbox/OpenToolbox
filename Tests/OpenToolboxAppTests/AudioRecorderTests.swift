@@ -112,6 +112,32 @@ struct AudioRecorderTests {
         }
     }
 
+    @Test func aRecordingCapturedIntoTheStoreIsKeptThereWhenTheOutputRefusesIt() async throws {
+        try await withRecorder { fixture in
+            let blocked = fixture.root.appending(path: "not-a-folder")
+            try Data().write(to: blocked)
+            let capture = try #require(fixture.store.beginCapture(for: fixture.destination.tool, extension: "m4a"))
+            try Data("audio".utf8).write(to: capture.url)
+            let output = AVCaptureAudioFileOutput()
+            fixture.recorder.adopt(
+                output, session: nil, temporary: capture.url, capture: capture,
+                destination: (OutputDirectory(baseDirectory: blocked), fixture.destination.tool))
+
+            var reported: [(ToolID, String)] = []
+            RecordingSessions.onUnsaved = { reported.append(($0, $1)) }
+            defer { RecordingSessions.onUnsaved = nil }
+            fixture.recorder.close()
+            deliverFinish(to: fixture.recorder, from: output, error: nil)
+            try await waitUntil { fixture.recorder.phase == .idle }
+
+            #expect(fixture.recorder.failure?.hasSuffix("It is kept below until you save it.") == true)
+            #expect(fixture.store.recordings(of: [fixture.destination.tool]).count == 1)
+            let captures = capture.url.deletingLastPathComponent()
+            #expect(try FileManager.default.contentsOfDirectory(atPath: captures.path).isEmpty)
+            #expect(reported.map(\.0) == [fixture.destination.tool])
+        }
+    }
+
     @Test func closingDuringStartLetsTheAppQuit() async throws {
         try await withRecorder { fixture in
             fixture.recorder.requestStart(output: fixture.destination.output, tool: fixture.destination.tool)

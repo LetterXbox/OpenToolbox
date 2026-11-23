@@ -104,7 +104,7 @@ Powered on-device by Apple's Vision, PDFKit, ImageIO, Image Capture, Quick Look,
 | **Keep Awake** | Prevent your Mac from sleeping for a set duration. |
 | **Battery Health** | Show battery cycle count, capacity, and condition. |
 | **Network Speed Test** | Measure network quality with Apple's `networkQuality`. |
-| **Disk Speed Test** | Measure a drive's sequential write and read speed with an uncached test file that is always cleaned up afterward. |
+| **Disk Speed Test** | Measure a drive's sequential write and read speed with an uncached test file that OpenToolbox creates and removes from the folder before writing any test data, so the file never stays behind once the test starts; if removing the file fails, the test stops before writing and shows its path so you can delete the file. |
 | **Eject All Disks** | Eject every external and disk-image volume. |
 | **Quarantine Helper** | Inspect and clear the quarantine flag on downloaded files. |
 | **Hidden Settings** | Toggle documented hidden macOS preferences. |
@@ -180,7 +180,7 @@ Choose **OpenToolbox → Check for Updates…** to check GitHub Releases manuall
 
 - **Not notarized / ad-hoc signed:** Releases require **Open Anyway** on first launch (see [Install](#install)). Because the signature is ad-hoc, it proves the app bundle is intact rather than publisher identity; trust in an update rests on the GitHub release. After an update, macOS may also ask again for **Screen Recording**, **Microphone**, **Speech Recognition**, and **Location** permissions.
 - **Intel Macs not tested:** The release download includes Intel code, but releases are tested only on Macs with Apple silicon.
-- **Unsaved recordings:** If **Record Screen** or **Record Audio** can't save a recording to the output folder, it is kept in **Unsaved Recordings** inside the recorder, where both tools can save or discard it later. If saving to **Unsaved Recordings** also fails, the error shows where the recording is stored; copy it from there before closing the tool.
+- **Unsaved recordings:** **Record Screen** and **Record Audio** normally record into a hidden folder inside OpenToolbox's Unsaved Recordings store in Application Support. If the output folder refuses a finished recording, OpenToolbox keeps the recording in **Unsaved Recordings**, shown in both recorders, so you can save or discard it later. If a crash or forced quit interrupts a recording in that store, the part already written appears in **Unsaved Recordings** as "Interrupted Recording" the next time the list is shown; OpenToolbox removes empty interrupted recordings. OpenToolbox writes a recording to a temporary folder only if the Unsaved Recordings folder cannot be used, and does not recover recordings from the temporary folder after a crash or forced quit. If a finished recording in the temporary folder cannot be saved, the error in the recorder shows where the recording is; if the recorder was already closed, OpenToolbox posts that message in a macOS notification, which appears only if notifications are allowed for OpenToolbox.
 - **PDF Password restrictions and removal:** Printing, copying, and editing restrictions are enforced only by PDF apps that respect them. Removing a password or restrictions requires the PDF's owner password (or its single password if one was used for both).
 - **Summarize and Transcribe system limits:** **Summarize** requires macOS 26 or later on a Mac with Apple Intelligence turned on. **Transcribe** uses Apple's newer speech engine on macOS 26 or later and the older on-device speech recognizer on earlier versions; the languages it offers depend on the recognizer your macOS version uses.
 - **Scan Document sources:** Works with scanners macOS supports through Image Capture, and with an iPhone or iPad through **File → Import from iPhone or iPad**.
@@ -192,9 +192,6 @@ Choose **OpenToolbox → Check for Updates…** to check GitHub Releases manuall
 - **Closing windows during active jobs:** Closing a window stops a Network Speed Test, Disk Speed Test, or duplicate scan running in that window. File batches already under way (such as image conversion or watermarking) finish as long as OpenToolbox remains running; with the menu bar icon off, closing the last window quits the app.
 - **Image and Watermark format limits:** Animated GIFs and multipage TIFFs (images with several frames or pages) are refused by Watermark and Compress Images. Watermarked PDFs keep vector graphics and searchable text, but links, form fields, comments, and outlines are not preserved as interactive elements.
 - **Updates apply on restart/quit:** While OpenToolbox stays open in the menu bar, a downloaded update waits until you choose **Restart to Update** or quit.
-- **Multiple copies from one folder:** Running two copies of OpenToolbox from the same folder at once causes the later instance to remove a staged update prepared by the first; run **Check for Updates…** again to re-download it.
-- **Startup bundle swap race:** OpenToolbox records its on-disk app bundle at launch. If something replaces the app on disk at that exact moment, a subsequent update from that session replaces the new copy instead.
-- **Unreported DMG mount path:** If macOS reports an update disk image without its file path, OpenToolbox cannot eject it, leaving it mounted (hidden and read-only) until you restart.
 
 ## Building from Source
 

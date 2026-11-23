@@ -31,3 +31,5 @@ Both judges worked separately from the same brief, read-only, at `026130b`.
 ## Follow-up
 
 Keep inventory rows that have a mount point but no `image-path`, treat them as not detached for the work folder that holds the mount, and add a fixture for that row. Listed in the README's known limitations until then.
+
+**Status:** done in v0.4.1. Inventory rows with a mount point but no `image-path` are kept. A row mounted inside a work folder counts as attached for that folder, is detached by device when it has one, and keeps the folder when it can't be detached. `imagesListedWithoutAPathKeepTheirWorkFolder` covers rows with and without a device.

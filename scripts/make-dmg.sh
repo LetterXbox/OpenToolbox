@@ -36,12 +36,22 @@ hdiutil verify "$DIST/$DMG_NAME"
 
 echo "==> Checking the app inside the disk image"
 MOUNT="$(mktemp -d "$WORK/mount.XXXXXX")"
+is_mounted() {
+    [ "$(stat -f %d "$MOUNT")" != "$(stat -f %d "$WORK")" ]
+}
 cleanup() {
-    hdiutil detach "$MOUNT" -quiet || true
+    if is_mounted; then
+        diskutil eject "$MOUNT" >/dev/null 2>&1 || hdiutil detach "$MOUNT" -quiet || true
+    fi
     rmdir "$MOUNT" 2>/dev/null || true
 }
 trap cleanup EXIT
-hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT" "$DIST/$DMG_NAME" >/dev/null
+if diskutil image attach --help >/dev/null 2>&1; then
+    diskutil image attach --readOnly --nobrowse --mountPoint "$MOUNT" "$DIST/$DMG_NAME" >/dev/null
+else
+    hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT" "$DIST/$DMG_NAME" >/dev/null
+fi
+is_mounted || { echo "error: the disk image did not mount at $MOUNT" >&2; exit 1; }
 codesign --verify --deep --strict --verbose=2 "$MOUNT/OpenToolbox.app"
 diff -r "$APP" "$MOUNT/OpenToolbox.app"
 echo "App in the disk image matches $APP"

@@ -103,6 +103,65 @@ struct UpdateCenterTests {
         }
     }
 
+    @Test func aCopyNewerThanTheLatestReleaseSaysNothingNewerIsAvailable() async throws {
+        try await withFixture(version: "0.4.1") { fixture in
+            let latest = AppVersion("0.4.0")!
+            fixture.checks.results = [.upToDate(latest: latest)]
+            let center = fixture.center()
+            center.checkNow(userInitiated: true)
+            try await waitUntil { center.phase == .upToDate(latest) }
+            #expect(center.upToDateDetail(latest: latest) == "You have version 0.4.1. No newer version is available.")
+            #expect(center.upToDateDetail(latest: AppVersion("0.4.1")!) == "Version 0.4.1 is the latest release.")
+        }
+    }
+
+    @Test func aFailedInstallOnQuitIsReportedOnceWithoutRepeatingItself() async throws {
+        try await withFixture(version: "0.2.0") { fixture in
+            fixture.installer.installError = UpdateError.installFailed("The prepared update is missing or has changed.")
+            let center = fixture.center()
+            center.install(fixture.update("0.3.0"))
+            try await waitUntil { if case .ready = center.phase { true } else { false } }
+            center.installOnQuit()
+
+            let next = fixture.center()
+            #expect(next.phase == .notInstalled(
+                "OpenToolbox tried to install it when it last quit. The prepared update is missing or has changed."))
+            #expect(next.takeLaunchNotice())
+            #expect(!next.takeLaunchNotice())
+            #expect(fixture.center().phase == .idle)
+        }
+    }
+
+    @Test func aFailedRestartGivesUpItsStagedUpdate() async throws {
+        try await withFixture(version: "0.2.0") { fixture in
+            fixture.installer.installError = UpdateError.installFailed("The prepared update is missing or has changed.")
+            let center = fixture.center()
+            center.install(fixture.update("0.3.0"))
+            try await waitUntil { if case .ready = center.phase { true } else { false } }
+            center.restartNow()
+            #expect(center.phase == .notInstalled("The prepared update is missing or has changed."))
+            #expect(fixture.installer.abandoned == [fixture.stagedApp])
+        }
+    }
+
+    @Test func anInstalledUpdateWaitingForRelaunchSurvivesALaterCheck() async throws {
+        try await withFixture(version: "0.2.0") { fixture in
+            let update = fixture.update("0.3.0")
+            let center = fixture.center()
+            center.install(update)
+            try await waitUntil { if case .ready = center.phase { true } else { false } }
+            center.restartNow()
+            #expect(fixture.terminations == 1)
+            #expect(fixture.installer.installed == [fixture.stagedApp])
+
+            center.cancelRelaunch()
+            fixture.checks.results = [.available(update)]
+            center.checkNow(userInitiated: true)
+            #expect(center.phase == .installedNeedsRelaunch(AppVersion("0.3.0")!))
+            #expect(fixture.checks.requests.isEmpty)
+        }
+    }
+
     @Test func noRecheckAfterAutomaticChecksAreTurnedOff() async throws {
         try await withFixture(version: "0.2.0", testBuilds: true) { fixture in
             fixture.checks.results = [.available(fixture.update("0.3.0-rc.1")), .available(fixture.update("0.3.0"))]
@@ -131,6 +190,7 @@ final class UpdateFixture {
     let suiteName = "OpenToolboxAppTests-\(UUID().uuidString)"
     let installer: StubInstaller
     let checks = StubChecks()
+    var terminations = 0
 
     init(version: String) throws {
         root = URL.temporaryDirectory.appending(path: "UpdateCenterTests-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -155,7 +215,8 @@ final class UpdateFixture {
         let checks = checks
         return UpdateCenter(
             defaults: defaults, bundle: Bundle(url: appURL)!, installer: installer,
-            check: { _, includingTestBuilds in try await checks.answer(includingTestBuilds: includingTestBuilds) })
+            check: { _, includingTestBuilds in try await checks.answer(includingTestBuilds: includingTestBuilds) },
+            runningExecutable: .unchecked, terminate: { [weak self] in self?.terminations += 1 })
     }
 
     func update(_ version: String) -> AppUpdate {
@@ -206,11 +267,18 @@ final class StubInstaller: UpdateInstalling, @unchecked Sendable {
     private let stagedApp: URL
     private var _discarded: [URL] = []
     private var _installed: [URL] = []
+    private var _abandoned: [URL] = []
     private var _prepareStarted = false
     private var _resumedCancelled: Bool?
     private var held: CheckedContinuation<Void, Never>?
     private var released = false
     var holdsPrepare = false
+    private var _installError: Error?
+
+    var installError: Error? {
+        get { lock.withLock { _installError } }
+        set { lock.withLock { _installError = newValue } }
+    }
 
     init(stagedApp: URL) {
         self.stagedApp = stagedApp
@@ -218,6 +286,7 @@ final class StubInstaller: UpdateInstalling, @unchecked Sendable {
 
     var discarded: [URL] { lock.withLock { _discarded } }
     var installed: [URL] { lock.withLock { _installed } }
+    var abandoned: [URL] { lock.withLock { _abandoned } }
     var prepareStarted: Bool { lock.withLock { _prepareStarted } }
     var resumedCancelled: Bool? { lock.withLock { _resumedCancelled } }
 
@@ -256,11 +325,16 @@ final class StubInstaller: UpdateInstalling, @unchecked Sendable {
     }
 
     func install(_ prepared: PreparedUpdate) throws {
+        if let error = installError { throw error }
         lock.withLock { _installed.append(prepared.stagedApp) }
     }
 
     func discard(_ prepared: PreparedUpdate) {
         lock.withLock { _discarded.append(prepared.stagedApp) }
+    }
+
+    func abandon(_ prepared: PreparedUpdate) {
+        lock.withLock { _abandoned.append(prepared.stagedApp) }
     }
 }
 

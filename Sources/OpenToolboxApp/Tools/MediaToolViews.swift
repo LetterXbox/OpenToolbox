@@ -33,7 +33,9 @@ private func isMissing(_ error: Error) -> Bool {
     }
 }
 
-private func removeIfEmpty(_ recording: URL, fileSize: (URL) throws -> Int? = recordingSize) -> Bool {
+private func removeIfEmpty(
+    _ recording: URL, fileSize: (URL) throws -> Int? = recordingSize, removesFolder: Bool = true
+) -> Bool {
     let isEmpty: Bool
     do {
         isEmpty = try fileSize(recording) == 0
@@ -41,24 +43,25 @@ private func removeIfEmpty(_ recording: URL, fileSize: (URL) throws -> Int? = re
     } catch {
         isEmpty = isMissing(error)
     }
-    if isEmpty { rmdir(recording.deletingLastPathComponent().path) }
+    if isEmpty, removesFolder { rmdir(recording.deletingLastPathComponent().path) }
     return isEmpty
 }
 
 private func saveRecording(
-    _ temporary: URL, named name: String, output: OutputDirectory, tool: ToolID, store: RecordingStore = .standard()
+    _ temporary: URL, named name: String, output: OutputDirectory, tool: ToolID, store: RecordingStore,
+    inStore: Bool
 ) -> (saved: URL?, failure: String?) {
     let outcome = store.publish(temporary, named: name, output: output, tool: tool)
     let folder = temporary.deletingLastPathComponent()
     switch outcome {
     case .saved(let url):
-        rmdir(folder.path)
+        if !inStore { rmdir(folder.path) }
         return (url, nil)
     case .kept(let url, let reason):
         guard url != temporary else {
             return (nil, L("The recording couldn't be saved: \(reason) It is still at \(url.path)."))
         }
-        rmdir(folder.path)
+        if !inStore { rmdir(folder.path) }
         return (nil, L("The recording couldn't be saved to the output folder: \(reason) It is kept below until you save it."))
     }
 }
@@ -173,10 +176,17 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
     @ObservationIgnored private var closeRequested = false
     @ObservationIgnored private var session = 0
 
+    @ObservationIgnored private let store: RecordingStore
     @ObservationIgnored private var stream: SCStream?
     @ObservationIgnored private var recording: SCRecordingOutput?
     @ObservationIgnored private var temporary: URL?
+    @ObservationIgnored private var capture: RecordingStore.Capture?
     @ObservationIgnored private var destination: (output: OutputDirectory, tool: ToolID)?
+
+    init(store: RecordingStore = .standard()) {
+        self.store = store
+        super.init()
+    }
 
     var isBusy: Bool { phase != .idle }
 
@@ -248,7 +258,8 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
         configuration.capturesAudio = capturesSystemAudio
         configuration.captureMicrophone = capturesMicrophone
         do {
-            let url = try temporaryFile(named: "recording.mov")
+            capture = destination.flatMap { store.beginCapture(for: $0.tool, extension: "mov") }
+            let url = try capture?.url ?? temporaryFile(named: "recording.mov")
             let recordingConfiguration = SCRecordingOutputConfiguration()
             recordingConfiguration.outputURL = url
             recordingConfiguration.outputFileType = .mov
@@ -284,20 +295,24 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
         guard let temporary, let destination else { return }
         let result = saveRecording(
             temporary, named: recordingName("Screen Recording", extension: "mov"), output: destination.output,
-            tool: destination.tool)
+            tool: destination.tool, store: store, inStore: capture != nil)
         saved = result.saved
-        if let message = result.failure { failure = message }
+        if let message = result.failure {
+            failure = message
+            if closeRequested { RecordingSessions.reportUnsaved(destination.tool, message) }
+        }
     }
 
     private func fail(_ error: Error) {
         defer { reset() }
         failure = error.localizedDescription
-        guard let temporary, !removeIfEmpty(temporary), let destination else { return }
+        guard let temporary, !removeIfEmpty(temporary, removesFolder: capture == nil), let destination else { return }
         let result = saveRecording(
             temporary, named: recordingName("Screen Recording", extension: "mov"), output: destination.output,
-            tool: destination.tool)
+            tool: destination.tool, store: store, inStore: capture != nil)
         saved = result.saved
         failure = result.failure ?? L("Recording stopped early: \(error.localizedDescription) What was recorded was saved.")
+        if closeRequested, let message = result.failure { RecordingSessions.reportUnsaved(destination.tool, message) }
     }
 
     private func reset() {
@@ -306,6 +321,8 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
         stream = nil
         recording = nil
         temporary = nil
+        if let capture { store.endCapture(capture) }
+        capture = nil
         phase = .idle
         Self.active.remove(self)
     }
@@ -385,6 +402,13 @@ final class ScreenRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDe
 
 enum RecordingSessions {
     @MainActor static var isRecording: Bool { !ScreenRecorder.active.isEmpty || !AudioRecorder.active.isEmpty }
+
+    /// Tells the user about a recording that wasn't saved to the output folder after its tool was closed.
+    @MainActor static var onUnsaved: ((ToolID, String) -> Void)?
+
+    @MainActor static func reportUnsaved(_ tool: ToolID, _ message: String) {
+        onUnsaved?(tool, message)
+    }
 
     @MainActor static func stopAll() async -> Bool {
         async let audio = AudioRecorder.stopAll()
@@ -500,6 +524,8 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
     @ObservationIgnored private var session: AVCaptureSession?
     @ObservationIgnored private var audioOutput: AVCaptureAudioFileOutput?
     @ObservationIgnored private var temporary: URL?
+    @ObservationIgnored private var capture: RecordingStore.Capture?
+    @ObservationIgnored private var closedWhileRecording = false
     @ObservationIgnored private var meterTask: Task<Void, Never>?
     @ObservationIgnored var fileSize: (URL) throws -> Int? = recordingSize
 
@@ -596,15 +622,16 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
             abandonStart(L("Recording couldn't start. Check that a microphone is connected."))
             return
         }
+        let capture = store.beginCapture(for: tool, extension: "m4a")
         let url: URL
         do {
-            url = try temporaryFile(named: "recording.m4a")
+            url = try capture?.url ?? temporaryFile(named: "recording.m4a")
         } catch {
             Self.stopRunning(session)
             abandonStart(error.localizedDescription)
             return
         }
-        adopt(fileOutput, session: session, temporary: url, destination: (output, tool))
+        adopt(fileOutput, session: session, temporary: url, capture: capture, destination: (output, tool))
         fileOutput.startRecording(to: url, outputFileType: .m4a, recordingDelegate: self)
         meterTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -616,11 +643,12 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
 
     func adopt(
         _ output: AVCaptureAudioFileOutput, session: AVCaptureSession?, temporary: URL,
-        destination: (output: OutputDirectory, tool: ToolID)
+        capture: RecordingStore.Capture? = nil, destination: (output: OutputDirectory, tool: ToolID)
     ) {
         self.session = session
         audioOutput = output
         self.temporary = temporary
+        self.capture = capture
         self.destination = destination
         Self.active.insert(self)
         phase = .recording(since: Date())
@@ -638,6 +666,7 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
             phase = .idle
             Self.active.remove(self)
         } else {
+            if phase != .idle { closedWhileRecording = true }
             stop()
         }
     }
@@ -654,16 +683,17 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
     private func finish(problem: String?) {
         defer { reset() }
         guard let temporary, let destination else { return }
-        guard !removeIfEmpty(temporary, fileSize: fileSize) else {
+        guard !removeIfEmpty(temporary, fileSize: fileSize, removesFolder: capture == nil) else {
             failure = problem.map { L("Recording failed: \($0)") } ?? L("Nothing was recorded.")
             return
         }
         let result = saveRecording(
             temporary, named: recordingName("Recording", extension: "m4a"), output: destination.output,
-            tool: destination.tool, store: store)
+            tool: destination.tool, store: store, inStore: capture != nil)
         saved = result.saved
         if let message = result.failure {
             failure = [problem, message].compactMap { $0 }.joined(separator: " ")
+            if closedWhileRecording { RecordingSessions.reportUnsaved(destination.tool, message) }
         } else if let problem {
             failure = L("Recording stopped early: \(problem) What was recorded was saved.")
         }
@@ -674,6 +704,9 @@ final class AudioRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
         session = nil
         audioOutput = nil
         temporary = nil
+        if let capture { store.endCapture(capture) }
+        capture = nil
+        closedWhileRecording = false
         destination = nil
         meterTask?.cancel()
         meterTask = nil

@@ -124,6 +124,19 @@ final class ToolNotifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    func announceUnsavedRecording(_ tool: ToolID, message: String) {
+        guard let center else { return }
+        let content = UNMutableNotificationContent()
+        content.title = L("A recording wasn't saved to the output folder")
+        content.body = message
+        content.userInfo = ["tool": tool]
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        Task {
+            guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true else { return }
+            try? await center.add(request)
+        }
+    }
+
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void

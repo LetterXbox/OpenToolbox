@@ -45,3 +45,5 @@ Three findings from the v0.3.0 release review failed two reviewed fix attempts. 
 **Astra (round 6): confirmed not critical, and the unlink gap may stay open past the v0.3.0 gate.** The read gap is closed by `e5c4c5d`, which checks the opened descriptor's type, device and inode before copying.
 
 **Decision:** the read gap is fixed, and the unlink gap is deferred.
+
+**Status:** A and the C unlink gap are done in v0.4.1. Record Screen and Record Audio capture into a locked, hidden folder inside Unsaved Recordings, so a recording the output folder refuses is kept with a rename in the same folder, and a capture whose lock is free after a crash is listed as an Interrupted Recording. A recording that isn't saved after its tool was closed is also reported in a notification. Discard and cleanup after Save move the kept file to a private name, check its identity there, and only then unlink it, moving anything else back.

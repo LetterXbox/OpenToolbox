@@ -68,9 +68,9 @@ public enum VideoDownloader {
         case .best:
             args += ["-f", "bv*+ba/b", "--merge-output-format", "mp4"]
         case .p1080:
-            args += ["-f", "bv*[height<=1080]+ba/b[height<=1080]", "--merge-output-format", "mp4"]
+            args += ["-f", "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b", "--merge-output-format", "mp4"]
         case .p720:
-            args += ["-f", "bv*[height<=720]+ba/b[height<=720]", "--merge-output-format", "mp4"]
+            args += ["-f", "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b", "--merge-output-format", "mp4"]
         case .audioM4A:
             args += ["-x", "--audio-format", "m4a"]
         case .audioMP3:

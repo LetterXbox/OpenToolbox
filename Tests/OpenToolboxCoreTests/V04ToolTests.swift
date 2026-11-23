@@ -423,6 +423,7 @@ struct V04ToolTests {
                 runner: { _, args, onLine in
                     #expect(args.contains("--ignore-config"))
                     #expect(args.contains("--no-plugin-dirs"))
+                    #expect(args.contains("bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b"))
                     let pIdx = try #require(args.firstIndex(of: "-P"))
                     let staging = URL(fileURLWithPath: args[pIdx + 1])
                     let media = staging.appending(path: "Sample_Video.mp4")

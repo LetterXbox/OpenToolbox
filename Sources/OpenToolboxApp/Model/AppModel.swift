@@ -78,6 +78,9 @@ final class AppModel {
     func start() {
         notifier.onOpen = { [weak self] tool, window in self?.reveal(tool, in: window) }
         notifier.start()
+        RecordingSessions.onUnsaved = { [weak self] tool, message in
+            self?.notifier.announceUnsavedRecording(tool, message: message)
+        }
         loginItem.refresh()
         applyHotKey()
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.willCloseNotification] {

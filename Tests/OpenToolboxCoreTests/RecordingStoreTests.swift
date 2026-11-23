@@ -132,4 +132,63 @@ struct RecordingStoreTests {
             #expect(FileManager.default.fileExists(atPath: entry.url.path))
         }
     }
+
+    @Test func aLiveCaptureIsHiddenAndAnInterruptedOneIsKept() async throws {
+        try await withTemporaryDirectory { directory in
+            let store = RecordingStore(directory: directory.appending(path: "store"))
+            let capture = try #require(store.beginCapture(for: audio, extension: "m4a"))
+            try Data("audio".utf8).write(to: capture.url)
+
+            let otherCopy = RecordingStore(directory: store.directory)
+            #expect(otherCopy.recordings(of: [audio]).isEmpty)
+            #expect(FileManager.default.fileExists(atPath: capture.url.path))
+
+            store.endCapture(capture)
+            let entries = store.recordings(of: [audio])
+            #expect(entries.map(\.name) == ["Interrupted Recording.m4a"])
+            #expect(try Data(contentsOf: try #require(entries.first).url) == Data("audio".utf8))
+            let captures = capture.url.deletingLastPathComponent()
+            #expect(try FileManager.default.contentsOfDirectory(atPath: captures.path).isEmpty)
+        }
+    }
+
+    @Test func anEmptyInterruptedCaptureIsRemoved() async throws {
+        try await withTemporaryDirectory { directory in
+            let store = RecordingStore(directory: directory.appending(path: "store"))
+            let capture = try #require(store.beginCapture(for: screen, extension: "mov"))
+            try Data().write(to: capture.url)
+            store.endCapture(capture)
+            #expect(store.recordings(of: [screen]).isEmpty)
+            let captures = capture.url.deletingLastPathComponent()
+            #expect(try FileManager.default.contentsOfDirectory(atPath: captures.path).isEmpty)
+        }
+    }
+
+    @Test func aFinishedCaptureIsPublishedOrKept() async throws {
+        try await withTemporaryDirectory { directory in
+            let store = RecordingStore(directory: directory.appending(path: "store"))
+            let capture = try #require(store.beginCapture(for: audio, extension: "m4a"))
+            try Data("audio".utf8).write(to: capture.url)
+            guard case .kept(let kept, _) = store.publish(
+                capture.url, named: "Take.m4a", output: try blockedOutput(directory), tool: audio)
+            else {
+                Issue.record("expected the recording to be kept")
+                return
+            }
+            store.endCapture(capture)
+            #expect(kept.lastPathComponent == "Take.m4a")
+            #expect(store.recordings(of: [audio]).map(\.name) == ["Take.m4a"])
+            #expect(!FileManager.default.fileExists(atPath: capture.url.path))
+        }
+    }
+
+    @Test func discardingLeavesNoStagedCopyBehind() async throws {
+        try await withTemporaryDirectory { directory in
+            let store = RecordingStore(directory: directory.appending(path: "store"))
+            _ = store.keep(try makeRecording(in: directory), named: "Take.m4a", tool: audio)
+            try store.discard(try #require(store.recordings(of: [audio]).first))
+            let names = try FileManager.default.contentsOfDirectory(atPath: store.folder(for: audio).path)
+            #expect(names.isEmpty)
+        }
+    }
 }

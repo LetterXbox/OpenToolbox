@@ -19,16 +19,16 @@ Clean-room boundary (see "Contributing" in the README):
   - copying their icons, screenshots, UI text or feature descriptions.
 - Design and word our own versions of any feature from scratch.
 
-## 2. Update the main README
+## 2. Update the main README and known limitations
 
-Update `README.md` for every release because it holds the user-facing feature list, install instructions, and known limitations.
+Update `README.md` and `docs/KNOWN_LIMITATIONS.md` for every release so the user-facing feature list, install instructions, and known limitations stay current.
 
-- Have **Gemini 4 Neon** write or update `README.md` so the tool list, highlights, privacy/network uses, build requirements, and known limitations accurately match the release.
+- Have **Gemini 4 Neon** write or update `README.md` (tool list, highlights, privacy/network uses, install steps, and build requirements) and `docs/KNOWN_LIMITATIONS.md` so they accurately match the release.
 - Keep existing project links (such as support/donation links, license, and credits) intact.
 
 ## 3. Review gate
 
-Run the release review (GPT-6.2 Astra, high effort) on the release commit and resolve or explicitly defer every finding. Record deferrals in `docs/reviews/` and update the README's known-limitations list (via Gemini 4 Neon if the README changes).
+Run the release review (GPT-6.2 Astra, high effort) on the release commit and resolve or explicitly defer every finding. Record deferrals in `docs/reviews/` and update `docs/KNOWN_LIMITATIONS.md` (via Gemini 4 Neon if docs change).
 
 ## 4. Package
 
@@ -71,4 +71,4 @@ A test build lets people try a release before it ships, through **Settings → U
 
 - Have **Gemini 4 Neon** write every GitHub release note.
 - Include **two sections only**: **New features** and **Bug fixes**, written plainly for people using the app.
-- Leave out install steps, checksums, testing status, known limitations, and internal/review details. Install steps and known limitations live in `README.md`; what was and wasn't tested, and on which platform, goes in the release pull request.
+- Leave out install steps, checksums, testing status, known limitations, and internal/review details. Install steps live in `README.md`, known limitations live in `docs/KNOWN_LIMITATIONS.md`, and what was and wasn't tested, and on which platform, goes in the release pull request.

@@ -66,7 +66,7 @@ Engines are shared across tools, verified by SHA-256, stored under `~/Library/Ap
 | Engine | Version | License |
 | --- | --- | --- |
 | FFmpeg & FFprobe | 9.1 | GPL-3.0-or-later |
-| yt-dlp (standalone macOS binary) | 2026.10.26 | GPL-3.0-or-later |
+| yt-dlp (standalone macOS binary) | 2026.11.23 | GPL-3.0-or-later |
 | 7-Zip (`7zz`) | 26.06 | LGPL-2.1-or-later, BSD-2-Clause, BSD-3-Clause, with upstream's unRAR license restriction for RAR decoding |
 | Ghostscript | 10.07.1 | AGPL-3.0-or-later |
 

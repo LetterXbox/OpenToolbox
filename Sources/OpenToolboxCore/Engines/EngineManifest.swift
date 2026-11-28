@@ -117,9 +117,9 @@ public enum EngineCatalog {
     public static let ghostscriptID: EngineID = "ghostscript"
 
     private static let ytDlpURL = URL(
-        string: "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp_macos")!
-    private static let ytDlpSHA256 = "0f922c15ccc0b83eefa1c8bc9104e434318c4bf16e408e1ee93b7745a6efe0aa"
-    private static let ytDlpSize: Int64 = 37_466_304
+        string: "https://github.com/yt-dlp/yt-dlp/releases/download/2026.11.23/yt-dlp_macos")!
+    private static let ytDlpSHA256 = "57654854886d0398a798895aadf5173e2749fbb5e249b9f3728022ab376e11fb"
+    private static let ytDlpSize: Int64 = 37_478_576
 
     private static let ghostscriptURL = URL(
         string: "https://pages.uoregon.edu/koch/Ghostscript-10.07.1.pkg")!
@@ -191,7 +191,7 @@ public enum EngineCatalog {
             summary: "Downloads video and audio from supported websites.",
             license: "GPL-3.0-or-later",
             homepage: URL(string: "https://github.com/yt-dlp/yt-dlp")!,
-            version: "2026.10.26",
+            version: "2026.11.23",
             artifacts: [
                 EngineArtifact(
                     architecture: .arm64,
